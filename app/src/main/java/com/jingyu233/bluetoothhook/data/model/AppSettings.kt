@@ -8,6 +8,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class AppSettings(
     val globalEnabled: Boolean = true,
+    val captureEnabled: Boolean = false,
     val webdavUrl: String = "",
     val webdavUsername: String = "",
     val webdavPassword: String = "",

@@ -78,6 +78,9 @@ object Logger {
         const val HOOK_INJECTOR = "BTHook:Hook:Injector"
         const val HOOK_BUILDER = "BTHook:Hook:Builder"
 
+        // Socket
+        const val HOOK_SOCKET = "BTHook:Hook:Socket"
+
         // Engine
         const val ENGINE_DYNAMIC = "BTHook:Engine:DynamicData"
 

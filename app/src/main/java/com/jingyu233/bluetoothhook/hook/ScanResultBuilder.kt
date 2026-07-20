@@ -70,23 +70,28 @@ class ScanResultBuilder(private val classLoader: ClassLoader) {
 
             val timestampNanos = SystemClock.elapsedRealtimeNanos()
 
-            // 确定事件类型
+            // 确定事件类型（随 SDK 版本变化）
+            // Android 14 (SDK 34)+ 使用新的常量值
+            val isSdk34Plus = android.os.Build.VERSION.SDK_INT >= 34
             val eventType = if (useExtendedAdvertising) {
-                0x00  // EXTENDED_ADVERTISING
+                if (isSdk34Plus) 0x01 else 0x00  // EXTENDED_ADVERTISING
             } else {
-                0x10  // LEGACY_ADVERTISING
+                if (isSdk34Plus) 0x13 else 0x10  // LEGACY_ADVERTISING
             }
+
+            // SDK 34+ 的 txPower 默认值不同
+            val txPower = if (isSdk34Plus) 127 else 0
 
             // 尝试使用完整参数的构造器
             try {
                 XposedHelpers.newInstance(
                     scanResultClass,
                     device,                  // BluetoothDevice
-                    eventType,               // eventType: 0x10 = LEGACY, 0x00 = EXTENDED
+                    eventType,               // eventType (SDK-dependent)
                     1,                       // primaryPhy: 1 = LE 1M
                     if (useExtendedAdvertising) 1 else 0,  // secondaryPhy: 1 = LE 1M, 0 = None
                     255,                     // advertisingSid: 255 = Not periodic
-                    0,                       // txPower: 0 = Unknown
+                    txPower,                 // txPower (SDK-dependent)
                     rssi,                    // rssi
                     0,                       // periodicAdvInt: 0 = None
                     scanRecord,              // ScanRecord

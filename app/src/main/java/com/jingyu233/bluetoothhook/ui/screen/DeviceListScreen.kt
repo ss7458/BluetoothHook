@@ -21,7 +21,8 @@ import com.jingyu233.bluetoothhook.ui.viewmodel.DeviceListViewModel
 fun DeviceListScreen(
     viewModel: DeviceListViewModel = viewModel(),
     onNavigateToEditor: (String?) -> Unit,
-    onNavigateToSettings: () -> Unit
+    onNavigateToSettings: () -> Unit,
+    onNavigateToCapture: () -> Unit
 ) {
     val devices by viewModel.devices.collectAsState(initial = emptyList())
     val globalEnabled by viewModel.globalEnabled.collectAsState()
@@ -38,6 +39,9 @@ fun DeviceListScreen(
                         viewModel.refreshHookStatus()
                     }) {
                         Icon(Icons.Default.Refresh, "刷新Hook状态")
+                    }
+                    IconButton(onClick = onNavigateToCapture) {
+                        Icon(Icons.Default.Wifi, "抓包日志")
                     }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Default.Settings, "设置")

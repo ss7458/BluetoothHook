@@ -5,10 +5,16 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.decodeFromString
 
 /**
- * 蓝牙扫描Hook核心类
- * 负责拦截ScanController.onScanResultInternal并注入虚拟设备
+ * 蓝牙扫描Hook核心类（自适应版本）
+ *
+ * - 按顺序尝试多个候选类，反射发现 onScanResultInternal 方法
+ * - 按参数类型（而非固定位置）提取真实扫描结果
+ * - 字段/方法查找支持多候选名回退，适配不同AOSP版本
+ * - 通过 localhost socket 将扫描数据和状态发给 App UI
  */
 class BluetoothScanHook(
     private val classLoader: ClassLoader,
@@ -16,129 +22,388 @@ class BluetoothScanHook(
 ) {
     companion object {
         private val TAG = Logger.Tags.HOOK_SCANNER
-        private const val CLASS_SCAN_CONTROLLER = "com.android.bluetooth.le_scan.ScanController"
-        private const val METHOD_ON_SCAN_RESULT_INTERNAL = "onScanResultInternal"
+
+        /** 候选类，按顺序尝试 */
+        private val CANDIDATE_CLASSES = arrayOf(
+            "com.android.bluetooth.le_scan.ScanController",
+            "com.android.bluetooth.le_scan.TransitionalScanHelper",
+            "com.android.bluetooth.gatt.ScanManager"
+        )
+
+        private const val METHOD_NAME = "onScanResultInternal"
+        private val MAC_REGEX = Regex("^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
     }
 
     private lateinit var scanResultBuilder: ScanResultBuilder
     private lateinit var virtualDeviceInjector: VirtualDeviceInjector
 
+    // ── 自适应发现/解析跟踪 ──────────────────────────────────
+    private var classFound: String = "NONE"
+    private var methodFound: String = "NONE"
+    private val resolvedFields: MutableSet<String> = mutableSetOf()
+    private var hasInjectedOnce = false
+
+    // ── 初始化 ───────────────────────────────────────────────
+
     fun init() {
         try {
-            Logger.Hook.i(TAG, "Initializing BluetoothScanHook")
+            Logger.Hook.i(TAG, "Initializing BluetoothScanHook (adaptive mode)")
 
-            // 初始化辅助工具
             scanResultBuilder = ScanResultBuilder(classLoader)
             virtualDeviceInjector = VirtualDeviceInjector(scanResultBuilder, prefs)
 
-            // Hook主要方法
             val hooked = hookScanResultInternal()
 
             if (hooked) {
-                Logger.Hook.i(TAG, "Successfully hooked ScanController.onScanResultInternal")
+                Logger.Hook.i(TAG, "Hooked $classFound.$methodFound")
+                sendStatusLine(fieldsResolved = "pending")
             } else {
-                Logger.Hook.e(TAG, "Failed to hook scan methods", null)
+                Logger.Hook.e(TAG, "Failed to hook any candidate class", null)
             }
-
         } catch (e: Throwable) {
-            Logger.Hook.e(TAG, "Failed to initialize BluetoothScanHook", e)
+            Logger.Hook.e(TAG, "Fatal init error", e)
         }
     }
 
+    // ── 候选类 + 方法发现 ────────────────────────────────────
+
     /**
-     * Hook ScanController.onScanResultInternal方法
-     * 这是逆向代码分析确定的最佳注入点（line 362）
+     * 遍历候选类，对第一个找到的类搜索所有 onScanResultInternal 重载，
+     * 选中参数中包含 byte[] 且参数最多的那个方法并 Hook。
      */
     private fun hookScanResultInternal(): Boolean {
-        return try {
-            val scanControllerClass = XposedHelpers.findClass(CLASS_SCAN_CONTROLLER, classLoader)
+        for (className in CANDIDATE_CLASSES) {
+            try {
+                val clazz = XposedHelpers.findClass(className, classLoader)
+                Logger.Hook.i(TAG, "Found class: $className")
 
-            // 查找方法（根据逆向代码分析的签名）
-            // onScanResultInternal(int eventType, int addressType, String address,
-            //                      int primaryPhy, int secondaryPhy, int advertisingSid,
-            //                      int txPower, int rssi, int periodicAdvInt,
-            //                      byte[] scanRecord, String originalAddress)
-            val method = XposedHelpers.findMethodBestMatch(
-                scanControllerClass,
-                METHOD_ON_SCAN_RESULT_INTERNAL,
-                Int::class.javaPrimitiveType,    // eventType
-                Int::class.javaPrimitiveType,    // addressType
-                String::class.java,              // address
-                Int::class.javaPrimitiveType,    // primaryPhy
-                Int::class.javaPrimitiveType,    // secondaryPhy
-                Int::class.javaPrimitiveType,    // advertisingSid
-                Int::class.javaPrimitiveType,    // txPower
-                Int::class.javaPrimitiveType,    // rssi
-                Int::class.javaPrimitiveType,    // periodicAdvInt
-                ByteArray::class.java,           // scanRecord
-                String::class.java               // originalAddress
-            )
+                // 枚举所有 declared 方法（含父类）
+                val method = findTargetMethod(clazz)
+                if (method != null) {
+                    classFound = clazz.name
+                    methodFound = method.name
+                    method.isAccessible = true
 
-            XposedBridge.hookMethod(method, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    try {
-                        // 在原方法执行完后注入虚拟设备
-                        injectVirtualDevices(param)
-                    } catch (e: Throwable) {
-                        // 捕获所有异常，避免影响真实扫描结果
-                        Logger.Hook.e(TAG, "Error during virtual device injection", e)
-                    }
+                    XposedBridge.hookMethod(method, object : XC_MethodHook() {
+                        override fun afterHookedMethod(param: MethodHookParam) {
+                            try {
+                                handleScanResult(param)
+                            } catch (e: Throwable) {
+                                Logger.Hook.e(TAG, "Error in afterHookedMethod", e)
+                            }
+                        }
+                    })
+
+                    Logger.Hook.i(TAG, "Hooked ${clazz.name}.${method.name} " +
+                            "(${method.parameterTypes.size} params)")
+                    return true
+                } else {
+                    Logger.Hook.d(TAG, "No suitable method in $className")
                 }
-            })
-
-            true
-        } catch (e: Throwable) {
-            Logger.Hook.e(TAG, "Failed to hook $METHOD_ON_SCAN_RESULT_INTERNAL", e)
-            false
+            } catch (e: Throwable) {
+                Logger.Hook.d(TAG, "Skipping candidate class: $className – ${e.message}")
+            }
         }
+        return false
     }
 
     /**
-     * 注入虚拟设备到扫描结果
-     * 在真实扫描结果处理完后调用
+     * 从类及其父类中找名为 METHOD_NAME 且参数包含 byte[] 的方法。
+     * 若有多个含 byte[] 的重载，选参数最多的那个。
      */
-    private fun injectVirtualDevices(param: XC_MethodHook.MethodHookParam) {
-        try {
-            // 重新加载配置（SharedPreferences可能被UI进程更新）
+    private fun findTargetMethod(clazz: Class<*>): java.lang.reflect.Method? {
+        val allMethods = mutableListOf<java.lang.reflect.Method>()
+        var current: Class<*>? = clazz
+        while (current != null) {
+            for (m in current.declaredMethods) {
+                if (m.name == METHOD_NAME) {
+                    allMethods.add(m)
+                }
+            }
+            current = current.superclass
+        }
+
+        val withByteArray = allMethods.filter { m ->
+            m.parameterTypes.any { it == ByteArray::class.java }
+        }
+        if (withByteArray.isEmpty()) return null
+
+        return withByteArray.maxByOrNull { it.parameterCount }
+    }
+
+    // ── afterHookedMethod 处理 ───────────────────────────────
+
+    /**
+     * 按参数类型而非固定位置提取真实扫描结果，然后执行 Capture + 注入。
+     */
+    private fun handleScanResult(param: XC_MethodHook.MethodHookParam) {
+        val args = param.args ?: return
+        if (args.isEmpty()) return
+
+        // ---- 1. 按类型提取参数 ----
+        var scanRecordBytes: ByteArray? = null
+        var scanRecordIndex = -1
+        val stringParams = mutableListOf<String>()
+
+        for (i in args.indices) {
+            when (args[i]) {
+                is ByteArray -> {
+                    if (scanRecordBytes == null) {
+                        scanRecordBytes = args[i] as ByteArray
+                        scanRecordIndex = i
+                    }
+                }
+                is String -> stringParams.add(args[i] as String)
+            }
+        }
+
+        // address：优先匹配 MAC 格式，否则取第一个 String
+        val address = stringParams.firstOrNull { it.matches(MAC_REGEX) }
+            ?: stringParams.firstOrNull()
+            ?: ""
+
+        // ---- 2. 按 AOSP 相对偏移提取 int 参数 ----
+        val si = scanRecordIndex
+        if (si < 0) return // 没有 byte[]，无法定位
+
+        val rssi: Int          = tryIntArg(args, si - 2, 0)
+        val txPower: Int       = tryIntArg(args, si - 1, 0)
+        val periodicAdvInt: Int = tryIntArg(args, si + 1, 0)
+        val eventType: Int     = tryIntArg(args, si - 3, 0)
+        val primaryPhy: Int    = tryIntArg(args, si - 4, 1)
+        val addressType: Int   = tryIntArg(args, si - 5, 0)
+
+        // ---- 3. Capture（若配置启用） ----
+        val captureEnabled = try {
             prefs.reload()
+            prefs.getBoolean("capture_enabled", false)
+        } catch (_: Throwable) { false }
 
-            // 检查全局开关
-            val globalEnabled = prefs.getBoolean("global_enabled", true)
-            if (!globalEnabled) {
-                return // 全局开关关闭，静默返回
-            }
-
-            // 获取ScanController实例
-            val scanControllerInstance = param.thisObject
-
-            // 获取mScanManager字段（根据逆向代码：line 410）
-            val scanManager = XposedHelpers.getObjectField(scanControllerInstance, "mScanManager")
-            if (scanManager == null) {
-                return
-            }
-
-            // 获取mScannerMap字段
-            val scannerMap = XposedHelpers.getObjectField(scanControllerInstance, "mScannerMap")
-            if (scannerMap == null) {
-                return
-            }
-
-            // 获取当前扫描队列（line 410: mScanManager.getRegularScanQueue()）
-            val scanQueue = XposedHelpers.callMethod(scanManager, "getRegularScanQueue") as? Collection<*>
-            if (scanQueue == null || scanQueue.isEmpty()) {
-                return // 没有活跃的扫描客户端，静默返回
-            }
-
-            // 执行虚拟设备注入
-            virtualDeviceInjector.injectDevices(
-                scanControllerInstance,
-                scanManager,
-                scannerMap,
-                scanQueue
+        if (captureEnabled) {
+            val capLine = buildCaptureLine(
+                timestampMs = System.currentTimeMillis(),
+                mac = address,
+                rssi = rssi,
+                eventType = eventType,
+                primaryPhy = primaryPhy,
+                addressType = addressType,
+                scanRecordBytes = scanRecordBytes
             )
+            CaptureSocket.sendLine(capLine)
+        }
 
+        // ---- 4. 注入虚拟设备 ----
+        injectVirtualDevicesAdaptive(param.thisObject)
+    }
+
+    /** 安全的 int 参数提取，越界/类型不匹配时返回默认值 */
+    private fun tryIntArg(args: Array<Any>, index: Int, default: Int): Int {
+        return if (index in args.indices && args[index] is Int) {
+            args[index] as Int
+        } else default
+    }
+
+    // ── Socket 消息构建 ──────────────────────────────────────
+
+    private fun buildCaptureLine(
+        timestampMs: Long,
+        mac: String,
+        rssi: Int,
+        eventType: Int,
+        primaryPhy: Int,
+        addressType: Int,
+        scanRecordBytes: ByteArray?
+    ): String {
+        val advDataHex = if (scanRecordBytes != null) {
+            scanRecordBytes.joinToString("") { String.format("%02x", it) }
+        } else ""
+        return "CAP|$timestampMs|$mac|$rssi|$eventType|$primaryPhy|$addressType|$advDataHex"
+    }
+
+    private fun buildStatusLine(fieldsResolved: String): String {
+        return "STATUS|${android.os.Build.VERSION.SDK_INT}|$classFound|$methodFound|$fieldsResolved|${System.currentTimeMillis()}"
+    }
+
+    /**
+     * 发送 STATUS 行。允许两次调用：
+     * 1) Hook 成功后 fieldsResolved="pending"
+     * 2) 首次成功注入后 fieldsResolved=真实字段名
+     */
+    private fun sendStatusLine(fieldsResolved: String) {
+        CaptureSocket.sendLine(buildStatusLine(fieldsResolved))
+    }
+
+    // ── 注入（自适应字段解析） ────────────────────────────────
+
+    /**
+     * 自适应解析 scanManager / scannerMap / scanQueue，然后
+     * 优先调用 VirtualDeviceInjector（保留现有逻辑），失败时
+     * 使用自适应 fallback 逐客户端投递。
+     */
+    private fun injectVirtualDevicesAdaptive(instance: Any) {
+        try {
+            prefs.reload()
+            if (!prefs.getBoolean("global_enabled", true)) return
+
+            val scanManager = resolveScanManager(instance) ?: return
+            val scannerMap  = resolveScannerMap(instance, scanManager) ?: return
+            val scanQueue   = resolveScanQueue(scanManager) ?: return
+            if (scanQueue.isEmpty()) return
+
+            // 优先走 VirtualDeviceInjector（保留现有注入逻辑），
+            // 失败时用自适应字段名逐客户端投递作为 fallback
+            var injectOk = false
+            try {
+                virtualDeviceInjector.injectDevices(instance, scanManager, scannerMap, scanQueue)
+                injectOk = true
+            } catch (e: Throwable) {
+                Logger.Hook.w(TAG, "VirtualDeviceInjector failed, trying adaptive fallback: ${e.message}")
+                try {
+                    adaptivePerClientDelivery(scannerMap, scanQueue)
+                    injectOk = true
+                } catch (e2: Throwable) {
+                    Logger.Hook.e(TAG, "Adaptive fallback also failed", e2)
+                }
+            }
+
+            // 首次成功注入后发送 STATUS（含已解析字段清单）
+            if (!hasInjectedOnce && injectOk) {
+                hasInjectedOnce = true
+                val fieldsStr = resolvedFields.ifEmpty { "N/A" }
+                sendStatusLine(fieldsResolved = fieldsStr)
+            }
         } catch (e: Throwable) {
-            Logger.Hook.e(TAG, "Error in injectVirtualDevices", e)
+            Logger.Hook.e(TAG, "injectVirtualDevicesAdaptive error", e)
+        }
+    }
+
+    // ── 自适应字段/方法解析 ──────────────────────────────────
+
+    /** 解析 scanManager（多候选名回退） */
+    private fun resolveScanManager(instance: Any): Any? {
+        // 1) mScanManager
+        var sm = tryGetField(instance, "mScanManager")
+        // 2) scanManager
+        if (sm == null) sm = tryGetField(instance, "scanManager")
+        // 3) mScanHelper.mScanManager
+        if (sm == null) {
+            val helper = tryGetField(instance, "mScanHelper")
+            if (helper != null) {
+                resolvedFields.add("mScanHelper")
+                sm = tryGetField(helper, "mScanManager")
+            }
+        }
+        // 4) mScanHelper 本身作为 ScanManager 使用
+        if (sm == null) sm = tryGetField(instance, "mScanHelper")
+        return sm
+    }
+
+    /** 解析 scannerMap */
+    private fun resolveScannerMap(instance: Any, scanManager: Any): Any? {
+        // 直接在 instance 上找
+        var map = tryGetField(instance, "mScannerMap")
+        if (map == null) map = tryGetField(instance, "scannerMap")
+        // 经 scanManager 找
+        if (map == null) map = tryGetField(scanManager, "mScannerMap")
+        if (map == null) map = tryGetField(scanManager, "scannerMap")
+        // 经 mScanHelper 找
+        if (map == null) {
+            val helper = tryGetField(instance, "mScanHelper")
+            if (helper != null) {
+                map = tryGetField(helper, "mScannerMap")
+            }
+        }
+        return map
+    }
+
+    /** 解析 scanQueue */
+    private fun resolveScanQueue(scanManager: Any): Collection<*>? {
+        try {
+            val q = XposedHelpers.callMethod(scanManager, "getRegularScanQueue") as? Collection<*>
+            if (q != null) {
+                resolvedFields.add("getRegularScanQueue")
+                return q
+            }
+        } catch (_: Throwable) { }
+        try {
+            val q = XposedHelpers.callMethod(scanManager, "getScanQueue") as? Collection<*>
+            if (q != null) {
+                resolvedFields.add("getScanQueue")
+                return q
+            }
+        } catch (_: Throwable) { }
+        return null
+    }
+
+    /** 安全的 getObjectField，成功时记录字段名 */
+    private fun tryGetField(obj: Any, fieldName: String): Any? {
+        return try {
+            val v = XposedHelpers.getObjectField(obj, fieldName)
+            if (v != null) resolvedFields.add(fieldName)
+            v
+        } catch (_: Throwable) { null }
+    }
+
+    /** 安全的 getIntField，成功时记录字段名 */
+    private fun tryGetIntField(obj: Any, fieldName: String): Int? {
+        return try {
+            val v = XposedHelpers.getIntField(obj, fieldName)
+            resolvedFields.add(fieldName)
+            v
+        } catch (_: Throwable) { null }
+    }
+
+    // ── 自适应逐客户端投递（fallback） ───────────────────────
+
+    /**
+     * 当 VirtualDeviceInjector 因字段名不匹配而失败时，
+     * 此 fallback 使用适配后的字段名逐客户端投递。
+     */
+    private fun adaptivePerClientDelivery(scannerMap: Any, scanQueue: Collection<*>) {
+        // 读取虚拟设备配置
+        val devicesJson = try { prefs.getString("devices", "[]") ?: "[]" } catch (_: Throwable) { "[]" }
+        if (devicesJson == "[]") return
+
+        val devices = try {
+            Json.decodeFromString<List<VirtualDeviceData>>(devicesJson)
+        } catch (_: Throwable) { return }
+
+        val enabledDevices = devices.filter { it.enabled }
+        if (enabledDevices.isEmpty()) return
+
+        for (device in enabledDevices) {
+            try {
+                val scanResult = scanResultBuilder.buildScanResult(
+                    macAddress = device.mac,
+                    rssi = device.rssi,
+                    advDataHex = device.advDataHex,
+                    scanResponseHex = device.scanResponseHex,
+                    useExtendedAdvertising = device.useExtendedAdvertising,
+                    deviceName = device.name
+                ) ?: continue
+
+                for (client in scanQueue) {
+                    if (client == null) continue
+                    try {
+                        // scannerId: mScannerId / scannerId
+                        val scannerId = tryGetIntField(client, "mScannerId")
+                            ?: tryGetIntField(client, "scannerId")
+                            ?: continue
+
+                        // scannerApp: scannerMap.getById(scannerId)
+                        val scannerApp = try {
+                            XposedHelpers.callMethod(scannerMap, "getById", scannerId)
+                        } catch (_: Throwable) { null } ?: continue
+
+                        // callback: mCallback / callback
+                        val callback = tryGetField(scannerApp, "mCallback")
+                            ?: tryGetField(scannerApp, "callback")
+                            ?: continue
+
+                        XposedHelpers.callMethod(callback, "onScanResult", scanResult)
+                    } catch (_: Throwable) { /* skip failed client */ }
+                }
+            } catch (_: Throwable) { /* skip failed device */ }
         }
     }
 }

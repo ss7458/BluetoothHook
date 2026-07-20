@@ -6,6 +6,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.jingyu233.bluetoothhook.ui.screen.CaptureScreen
 import com.jingyu233.bluetoothhook.ui.screen.DeviceEditorScreen
 import com.jingyu233.bluetoothhook.ui.screen.DeviceListScreen
 import com.jingyu233.bluetoothhook.ui.screen.SettingsScreen
@@ -19,6 +20,7 @@ sealed class Screen(val route: String) {
         fun createRoute(deviceId: String?) =
             if (deviceId != null) "device_editor/$deviceId" else "device_editor/new"
     }
+    object CaptureLog : Screen("capture_log")
     object Settings : Screen("settings")
 }
 
@@ -38,6 +40,9 @@ fun BluetoothHookNavigation() {
                 },
                 onNavigateToSettings = {
                     navController.navigate(Screen.Settings.route)
+                },
+                onNavigateToCapture = {
+                    navController.navigate(Screen.CaptureLog.route)
                 }
             )
         }
@@ -60,6 +65,13 @@ fun BluetoothHookNavigation() {
         // 设置屏幕
         composable(Screen.Settings.route) {
             SettingsScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        // 扫描抓包屏幕
+        composable(Screen.CaptureLog.route) {
+            CaptureScreen(
                 onNavigateBack = { navController.popBackStack() }
             )
         }

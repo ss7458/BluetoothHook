@@ -32,6 +32,7 @@ class SettingsDataStore(private val context: Context) {
         private val KEY_WEBDAV_PASSWORD = stringPreferencesKey("webdav_password")
         private val KEY_AUTO_SYNC_ENABLED = booleanPreferencesKey("auto_sync_enabled")
         private val KEY_SYNC_INTERVAL_SECONDS = intPreferencesKey("sync_interval_seconds")
+        private val KEY_CAPTURE_ENABLED = booleanPreferencesKey("capture_enabled")
     }
 
     /**
@@ -50,6 +51,7 @@ class SettingsDataStore(private val context: Context) {
         }
         .map { preferences ->
             AppSettings(
+                captureEnabled = preferences[KEY_CAPTURE_ENABLED] ?: false,
                 webdavUrl = preferences[KEY_WEBDAV_URL] ?: "",
                 webdavUsername = preferences[KEY_WEBDAV_USERNAME] ?: "",
                 webdavPassword = preferences[KEY_WEBDAV_PASSWORD] ?: "",
@@ -111,6 +113,20 @@ class SettingsDataStore(private val context: Context) {
             Logger.App.d(TAG, "Updated auto sync enabled: $enabled")
         } catch (e: IOException) {
             Logger.App.e(TAG, "Failed to update auto sync", e)
+        }
+    }
+
+    /**
+     * 切换抓包开关
+     */
+    suspend fun toggleCaptureEnabled(enabled: Boolean) {
+        try {
+            context.dataStore.edit { preferences ->
+                preferences[KEY_CAPTURE_ENABLED] = enabled
+            }
+            Logger.App.d(TAG, "Updated capture enabled: $enabled")
+        } catch (e: IOException) {
+            Logger.App.e(TAG, "Failed to update capture enabled", e)
         }
     }
 

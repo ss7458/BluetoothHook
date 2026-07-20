@@ -22,6 +22,7 @@ class ConfigBridge(private val context: Context) {
         // SharedPreferences键名
         private const val KEY_DEVICES = "devices"
         private const val KEY_GLOBAL_ENABLED = "global_enabled"
+        const val KEY_CAPTURE_ENABLED = "capture_enabled"
         private const val KEY_LAST_UPDATED = "last_updated"
     }
 
@@ -91,6 +92,39 @@ class ConfigBridge(private val context: Context) {
         } catch (e: Exception) {
             Logger.App.e(TAG, "Failed to get global enabled state", e)
             true // 默认启用
+        }
+    }
+
+    /**
+     * 设置抓包开关状态
+     */
+    @Suppress("DEPRECATION")
+    fun setCaptureEnabled(enabled: Boolean) {
+        try {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_WORLD_READABLE)
+            prefs.edit()
+                .putBoolean(KEY_CAPTURE_ENABLED, enabled)
+                .putLong(KEY_LAST_UPDATED, System.currentTimeMillis())
+                .commit()
+
+            Logger.App.d(TAG, "Set capture_enabled = $enabled")
+
+        } catch (e: Exception) {
+            Logger.App.e(TAG, "Failed to set capture enabled state", e)
+        }
+    }
+
+    /**
+     * 获取抓包开关状态
+     */
+    @Suppress("DEPRECATION")
+    fun isCaptureEnabled(): Boolean {
+        return try {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_WORLD_READABLE)
+            prefs.getBoolean(KEY_CAPTURE_ENABLED, false)
+        } catch (e: Exception) {
+            Logger.App.e(TAG, "Failed to get capture enabled state", e)
+            false // 默认关闭
         }
     }
 

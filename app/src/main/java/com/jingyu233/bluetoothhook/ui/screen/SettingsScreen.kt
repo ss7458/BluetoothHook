@@ -81,6 +81,16 @@ fun SettingsScreen(
                 }
             }
 
+            // 抓包设置部分
+            item {
+                SettingsSection(title = "抓包设置") {
+                    CaptureSettingsCard(
+                        captureEnabled = settings.captureEnabled,
+                        onCaptureToggle = { viewModel.setCaptureEnabled(it) }
+                    )
+                }
+            }
+
             // WebDAV同步部分
             item {
                 SettingsSection(title = "WebDAV 同步") {
@@ -137,6 +147,38 @@ fun SettingsSection(
             modifier = Modifier.padding(bottom = 8.dp)
         )
         content()
+    }
+}
+
+@Composable
+fun CaptureSettingsCard(
+    captureEnabled: Boolean,
+    onCaptureToggle: (Boolean) -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "扫描抓包 (Capture)",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                )
+                Text(
+                    text = "开启后捕获蓝牙扫描过程的通信数据",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = captureEnabled,
+                onCheckedChange = onCaptureToggle
+            )
+        }
     }
 }
 

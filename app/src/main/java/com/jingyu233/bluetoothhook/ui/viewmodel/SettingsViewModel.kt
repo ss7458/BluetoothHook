@@ -17,8 +17,11 @@ import com.jingyu233.bluetoothhook.sync.WebDavClient
 import com.jingyu233.bluetoothhook.util.JsonImportExport
 import com.jingyu233.bluetoothhook.utils.Logger
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -79,6 +82,24 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             } catch (e: Exception) {
                 Logger.App.e(TAG, "Failed to load device count", e)
             }
+        }
+    }
+
+    /**
+     * 抓包开关状态
+     */
+    val captureEnabled: StateFlow<Boolean> = _settings.map { it.captureEnabled }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    /**
+     * 设置抓包开关
+     */
+    fun setCaptureEnabled(enabled: Boolean) {
+        _settings.value = _settings.value.copy(captureEnabled = enabled)
+        viewModelScope.launch {
+            settingsDataStore.toggleCaptureEnabled(enabled)
+            configBridge.setCaptureEnabled(enabled)
+            Logger.App.i(TAG, "Capture enabled set to: $enabled")
         }
     }
 

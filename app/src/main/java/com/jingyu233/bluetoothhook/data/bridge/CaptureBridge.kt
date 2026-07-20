@@ -118,7 +118,7 @@ object CaptureBridge {
                                     val reader = BufferedReader(
                                         InputStreamReader(socket.getInputStream(), Charsets.UTF_8)
                                     )
-                                    var line: String?
+                                    var line: String? = null
                                     while (isActive && reader.readLine().also { line = it } != null) {
                                         line?.let { processLine(it) }
                                     }

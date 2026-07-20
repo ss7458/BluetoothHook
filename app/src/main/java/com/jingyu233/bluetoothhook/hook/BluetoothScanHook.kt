@@ -6,7 +6,6 @@ import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.decodeFromString
 
 /**
  * 蓝牙扫描Hook核心类（自适应版本）
@@ -269,7 +268,7 @@ class BluetoothScanHook(
             // 首次成功注入后发送 STATUS（含已解析字段清单）
             if (!hasInjectedOnce && injectOk) {
                 hasInjectedOnce = true
-                val fieldsStr = resolvedFields.ifEmpty { "N/A" }
+                val fieldsStr = if (resolvedFields.isEmpty()) "N/A" else resolvedFields.joinToString(",")
                 sendStatusLine(fieldsResolved = fieldsStr)
             }
         } catch (e: Throwable) {

@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.jingyu233.bluetoothhook.data.bridge.CaptureBridge
 import com.jingyu233.bluetoothhook.data.bridge.CaptureBridge.HookStatus
 import com.jingyu233.bluetoothhook.data.bridge.ConfigBridge
+import com.jingyu233.bluetoothhook.data.local.SettingsDataStore
 import com.jingyu233.bluetoothhook.data.model.CaptureRecord
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +24,7 @@ import kotlinx.coroutines.launch
 class CaptureViewModel(application: Application) : AndroidViewModel(application) {
 
     private val configBridge = ConfigBridge(application)
+    private val settingsDataStore = SettingsDataStore(application)
 
     init {
         CaptureBridge.startServer()
@@ -45,6 +47,9 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     fun setCaptureEnabled(enabled: Boolean) {
         _captureEnabled.value = enabled
         configBridge.setCaptureEnabled(enabled)
+        viewModelScope.launch {
+            settingsDataStore.toggleCaptureEnabled(enabled)
+        }
     }
 
     /** 清空所有抓包记录 */

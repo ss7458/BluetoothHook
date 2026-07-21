@@ -96,16 +96,8 @@ data class VirtualDevice(
 
         return when {
             totalBytes <= 31 -> Pair(advDataHex, "")
-            totalBytes <= 62 -> {
-                // 分割为31字节广播 + 剩余扫描响应
-                val advPart = advDataHex.substring(0, 62)
-                val scanPart = advDataHex.substring(62)
-                Pair(advPart, scanPart)
-            }
-            else -> {
-                // 超过62字节，使用扩展广播模式
-                Pair(advDataHex, "")
-            }
+            totalBytes <= 62 -> AdvDataUtils.splitAtAdBoundary(advDataHex, maxAdvBytes = 31)
+            else -> Pair(advDataHex, "")
         }
     }
 }

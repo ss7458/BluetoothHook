@@ -14,6 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jingyu233.bluetoothhook.data.model.VirtualDevice
+import com.jingyu233.bluetoothhook.ui.components.HookStatusSection
 import com.jingyu233.bluetoothhook.ui.viewmodel.DeviceListViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -35,13 +36,8 @@ fun DeviceListScreen(
             TopAppBar(
                 title = { Text("虚拟蓝牙设备") },
                 actions = {
-                    IconButton(onClick = {
-                        viewModel.refreshHookStatus()
-                    }) {
-                        Icon(Icons.Default.Refresh, "刷新Hook状态")
-                    }
                     IconButton(onClick = onNavigateToCapture) {
-                        Icon(Icons.Default.Wifi, "抓包日志")
+                        Icon(Icons.Default.BluetoothSearching, "扫描抓包")
                     }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Default.Settings, "设置")
@@ -63,9 +59,10 @@ fun DeviceListScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // Hook状态卡片
-            HookStatusCard(
+            // Hook 状态（统一入口，抓包页不再重复展示）
+            HookStatusSection(
                 status = hookStatus,
+                onRefresh = { viewModel.refreshHookStatus() },
                 modifier = Modifier.padding(16.dp)
             )
 
@@ -155,57 +152,7 @@ fun DeviceListScreen(
 }
 
 @Composable
-fun HookStatusCard(
-    status: String,
-    modifier: Modifier = Modifier
-) {
-    val (color, icon, text) = when (status) {
-        "Active" -> Triple(
-            MaterialTheme.colorScheme.primaryContainer,
-            Icons.Default.CheckCircle,
-            "Hook已激活"
-        )
-        "Unknown" -> Triple(
-            MaterialTheme.colorScheme.surfaceVariant,
-            Icons.Default.Info,
-            "Hook状态未知"
-        )
-        else -> Triple(
-            MaterialTheme.colorScheme.errorContainer,
-            Icons.Default.Warning,
-            "Hook未激活"
-        )
-    }
-
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = color)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(icon, null, modifier = Modifier.size(24.dp))
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
-                Text(
-                    text = text,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "请在LSPosed中启用模块并重启蓝牙服务",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun DeviceListItem(
+fun EmptyState(
     device: VirtualDevice,
     onToggle: () -> Unit,
     onEdit: () -> Unit,
@@ -224,14 +171,17 @@ fun DeviceListItem(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onEdit)
                 .padding(16.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(onClick = onEdit)
+                ) {
                     Text(
                         text = device.name,
                         style = MaterialTheme.typography.titleMedium,

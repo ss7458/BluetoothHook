@@ -3,7 +3,9 @@ package com.jingyu233.bluetoothhook.ui.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.jingyu233.bluetoothhook.data.bridge.CaptureBridge
 import com.jingyu233.bluetoothhook.data.bridge.ConfigBridge
+import com.jingyu233.bluetoothhook.data.bridge.HookStatusHelper
 import com.jingyu233.bluetoothhook.data.local.VirtualDeviceDatabase
 import com.jingyu233.bluetoothhook.data.model.VirtualDevice
 import com.jingyu233.bluetoothhook.data.repository.VirtualDeviceRepository
@@ -13,9 +15,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/**
- * 设备列表ViewModel
- */
 class DeviceListViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
@@ -31,36 +30,31 @@ class DeviceListViewModel(application: Application) : AndroidViewModel(applicati
     private val _globalEnabled = MutableStateFlow(true)
     val globalEnabled: StateFlow<Boolean> = _globalEnabled.asStateFlow()
 
-    private val _hookStatus = MutableStateFlow("Unknown")
-    val hookStatus: StateFlow<String> = _hookStatus.asStateFlow()
+    private val _hookStatus = MutableStateFlow(
+        HookStatusHelper.resolve(null, HookStatusHelper.isModuleActive(application))
+    )
+    val hookStatus: StateFlow<HookStatusHelper.Status> = _hookStatus.asStateFlow()
 
     init {
-        // 加载全局开关状态
         _globalEnabled.value = configBridge.getGlobalEnabled()
+        refreshHookStatus()
 
-        // 加载Hook状态
-        _hookStatus.value = configBridge.getHookStatus()
-
-        // 监听设备列表变化，自动同步到SharedPreferences
         viewModelScope.launch {
-            devices.collect { deviceList ->
-                syncToConfigBridge(deviceList)
+            CaptureBridge.hookStatus.collect {
+                _hookStatus.value = HookStatusHelper.resolve(
+                    it,
+                    HookStatusHelper.isModuleActive(getApplication())
+                )
             }
         }
     }
 
-    /**
-     * 设置全局开关
-     */
     fun setGlobalEnabled(enabled: Boolean) {
         _globalEnabled.value = enabled
         configBridge.setGlobalEnabled(enabled)
         Logger.App.i(TAG, "Global enabled set to: $enabled")
     }
 
-    /**
-     * 切换设备启用状态
-     */
     fun toggleDevice(device: VirtualDevice) {
         viewModelScope.launch {
             repository.toggleDevice(device)
@@ -68,9 +62,6 @@ class DeviceListViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /**
-     * 删除设备
-     */
     fun deleteDevice(device: VirtualDevice) {
         viewModelScope.launch {
             repository.deleteDevice(device)
@@ -78,19 +69,11 @@ class DeviceListViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /**
-     * 同步��备列表到ConfigBridge
-     */
-    private fun syncToConfigBridge(devices: List<VirtualDevice>) {
-        configBridge.writeDeviceConfig(devices)
-        Logger.App.d(TAG, "Synced ${devices.size} devices to ConfigBridge")
-    }
-
-    /**
-     * 刷新Hook状态
-     */
     fun refreshHookStatus() {
-        _hookStatus.value = configBridge.getHookStatus()
-        Logger.App.d(TAG, "Refreshed hook status: ${_hookStatus.value}")
+        _hookStatus.value = HookStatusHelper.resolve(
+            CaptureBridge.hookStatus.value,
+            HookStatusHelper.isModuleActive(getApplication())
+        )
+        Logger.App.d(TAG, "Refreshed hook status: ${_hookStatus.value.summary}")
     }
 }

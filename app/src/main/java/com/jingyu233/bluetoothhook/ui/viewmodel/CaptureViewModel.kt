@@ -7,12 +7,14 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.jingyu233.bluetoothhook.data.bridge.CaptureBridge
-import com.jingyu233.bluetoothhook.data.bridge.CaptureBridge.HookStatus
+import com.jingyu233.bluetoothhook.data.bridge.HookStatusHelper
 import com.jingyu233.bluetoothhook.data.local.SettingsDataStore
 import com.jingyu233.bluetoothhook.data.model.CaptureRecord
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -27,8 +29,13 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
 
     // 直接暴露 CaptureBridge 的 StateFlow
     val captureRecords: StateFlow<List<CaptureRecord>> = CaptureBridge.captureRecords
-    val hookStatus: StateFlow<HookStatus?> = CaptureBridge.hookStatus
     val isListening: StateFlow<Boolean> = CaptureBridge.isListening
+
+    // Hook 状态通过 HookStatusHelper 统一解析（与首页一致）
+    private val _hookStatus = MutableStateFlow(
+        HookStatusHelper.resolve(null, HookStatusHelper.isModuleActive(application))
+    )
+    val hookStatus: StateFlow<HookStatusHelper.Status> = _hookStatus.asStateFlow()
 
     // 抓包开关从 DataStore 派生（Application 的 collector 负责同步到 ConfigBridge）
     val captureEnabled: StateFlow<Boolean> = settingsDataStore.settingsFlow
@@ -38,10 +45,27 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     // 服务端错误信息
     val serverError: StateFlow<String?> = CaptureBridge.serverError
 
+    init {
+        viewModelScope.launch {
+            CaptureBridge.hookStatus.collect {
+                _hookStatus.value = HookStatusHelper.resolve(
+                    it, HookStatusHelper.isModuleActive(getApplication())
+                )
+            }
+        }
+    }
+
     fun setCaptureEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsDataStore.toggleCaptureEnabled(enabled)
         }
+    }
+
+    fun refreshHookStatus() {
+        _hookStatus.value = HookStatusHelper.resolve(
+            CaptureBridge.hookStatus.value,
+            HookStatusHelper.isModuleActive(getApplication())
+        )
     }
 
     /** 清空所有抓包记录 */

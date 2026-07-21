@@ -36,8 +36,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.jingyu233.bluetoothhook.data.bridge.CaptureBridge
 import com.jingyu233.bluetoothhook.data.model.CaptureRecord
+import com.jingyu233.bluetoothhook.ui.components.HookStatusSection
 import com.jingyu233.bluetoothhook.ui.viewmodel.CaptureViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -125,11 +125,12 @@ fun CaptureScreen(
                 }
             }
 
-            // Hook 状态卡片
-            HookCaptureStatusCard(
+            // Hook 状态卡片（复用首页统一组件，默认展开详情）
+            HookStatusSection(
                 status = hookStatus,
-                serverError = serverError,
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp)
+                onRefresh = { viewModel.refreshHookStatus() },
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
+                initiallyExpanded = true
             )
 
             // 重启蓝牙命令卡片
@@ -258,9 +259,6 @@ fun CaptureScreen(
 
 // ---- 子组件 ----
 
-/**
- * 脉冲圆点，表示监听进行中
- */
 @Composable
 private fun PulsingDot() {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -279,122 +277,6 @@ private fun PulsingDot() {
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.primary.copy(alpha = alpha))
     )
-}
-
-/**
- * Hook 状态卡片 - 展示 CaptureBridge.HookStatus 详细信息
- */
-@Composable
-private fun HookCaptureStatusCard(
-    status: CaptureBridge.HookStatus?,
-    serverError: String?,
-    modifier: Modifier = Modifier
-) {
-    Card(modifier = modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = if (status != null) Icons.Default.CheckCircle else Icons.Default.Info,
-                    contentDescription = null,
-                    tint = if (status != null)
-                        MaterialTheme.colorScheme.primary
-                    else
-                        MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Hook 状态",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-            Divider()
-            Spacer(modifier = Modifier.height(12.dp))
-
-            if (status != null) {
-                val classOk = status.classFound != "NONE"
-                val methodOk = status.methodFound != "NONE"
-                val fieldsOk = status.fieldsResolved != "NONE"
-
-                HookStatusRow(label = "SDK", value = "${status.sdkInt}")
-                Spacer(modifier = Modifier.height(8.dp))
-                HookStatusRow(
-                    label = "Class",
-                    value = status.classFound,
-                    ok = classOk
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                HookStatusRow(
-                    label = "Method",
-                    value = status.methodFound,
-                    ok = methodOk
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                HookStatusRow(
-                    label = "Fields",
-                    value = status.fieldsResolved,
-                    ok = fieldsOk
-                )
-            } else if (serverError != null) {
-                Text(
-                    text = "抓包服务异常，请查看上方提示",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                Text(
-                    text = "等待蓝牙扫描…（如长时间无数据，请重启蓝牙）",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun HookStatusRow(
-    label: String,
-    value: String,
-    ok: Boolean? = null
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = "$label:",
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(56.dp)
-        )
-        if (ok != null) {
-            Icon(
-                imageVector = if (ok) Icons.Default.CheckCircle else Icons.Default.Warning,
-                contentDescription = null,
-                tint = if (ok) Color(0xFF4CAF50) else Color(0xFFFF9800),
-                modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-        }
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.SemiBold,
-            color = when {
-                ok == true -> Color(0xFF4CAF50)
-                ok == false -> Color(0xFFFF9800)
-                else -> MaterialTheme.colorScheme.onSurface
-            },
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
 }
 
 /**
@@ -629,7 +511,7 @@ private fun CaptureEmptyState(modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.Center
     ) {
         Icon(
-            imageVector = Icons.Default.Wifi,
+            imageVector = Icons.Default.BluetoothSearching,
             contentDescription = null,
             modifier = Modifier.size(64.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
@@ -642,7 +524,7 @@ private fun CaptureEmptyState(modifier: Modifier = Modifier) {
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "开启抓包开关并让设备蓝牙扫描…",
+            text = "开启抓包开关并让设备蓝牙扫描。Hook 状态请查看首页。",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
         )

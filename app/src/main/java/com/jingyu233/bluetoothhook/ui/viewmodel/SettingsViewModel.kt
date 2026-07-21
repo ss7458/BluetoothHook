@@ -4,7 +4,8 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.jingyu233.bluetoothhook.data.bridge.ConfigBridge
+import com.jingyu233.bluetoothhook.data.bridge.CaptureBridge
+import com.jingyu233.bluetoothhook.data.bridge.HookStatusHelper
 import com.jingyu233.bluetoothhook.data.local.SettingsDataStore
 import com.jingyu233.bluetoothhook.data.local.VirtualDeviceDatabase
 import com.jingyu233.bluetoothhook.data.model.AppSettings
@@ -36,14 +37,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     private val database = VirtualDeviceDatabase.getInstance(application)
     private val repository = VirtualDeviceRepository(database.virtualDeviceDao(), application)
-    private val configBridge = ConfigBridge(application)
     private val settingsDataStore = SettingsDataStore(application)
 
     private val _settings = MutableStateFlow(AppSettings())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
-    private val _hookStatus = MutableStateFlow("Unknown")
-    val hookStatus: StateFlow<String> = _hookStatus.asStateFlow()
+    private val _hookStatus = MutableStateFlow(
+        HookStatusHelper.resolve(null, HookStatusHelper.isModuleActive(application))
+    )
+    val hookStatus: StateFlow<HookStatusHelper.Status> = _hookStatus.asStateFlow()
 
     private val _deviceCount = MutableStateFlow(0)
     val deviceCount: StateFlow<Int> = _deviceCount.asStateFlow()
@@ -103,8 +105,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun refreshHookStatus() {
-        _hookStatus.value = configBridge.getHookStatus()
-        Logger.App.d(TAG, "Refreshed hook status: ${_hookStatus.value}")
+        _hookStatus.value = HookStatusHelper.resolve(
+            CaptureBridge.hookStatus.value,
+            HookStatusHelper.isModuleActive(getApplication())
+        )
+        Logger.App.d(TAG, "Refreshed hook status: ${_hookStatus.value.summary}")
     }
 
     fun refreshDeviceCount() {

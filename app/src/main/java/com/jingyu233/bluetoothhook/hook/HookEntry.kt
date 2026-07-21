@@ -46,14 +46,8 @@ class HookEntry : IXposedHookLoadPackage {
                 Logger.Hook.w(TAG, "Failed to make preferences world-readable: ${e.message}")
             }
 
-            // 检查模块是否启用
+            // 始终初始化 Hook：虚拟注入由 global_enabled 控制，抓包由 capture_enabled 控制
             prefs.reload()
-            val enabled = prefs.getBoolean("global_enabled", true)
-
-            if (!enabled) {
-                Logger.Hook.i(TAG, "Module is disabled by user")
-                return
-            }
 
             // 初始化蓝牙扫描Hook
             val bluetoothScanHook = BluetoothScanHook(lpparam.classLoader, prefs)

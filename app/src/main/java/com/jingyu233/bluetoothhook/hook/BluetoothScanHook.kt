@@ -42,6 +42,10 @@ class BluetoothScanHook(
     private val resolvedFields: MutableSet<String> = mutableSetOf()
     private var hasInjectedOnce = false
 
+    /** 最近一次扫描回调的 ScanController 实例，供定时注入使用 */
+    @Volatile
+    private var cachedScanInstance: Any? = null
+
     // ── Prefs reload throttling ──────────────────────────────
     private var lastPrefReloadMs = 0L
     private var cachedCaptureEnabled = false
@@ -61,6 +65,7 @@ class BluetoothScanHook(
             if (hooked) {
                 Logger.Hook.i(TAG, "Hooked $classFound.$methodFound")
                 sendStatusLine(fieldsResolved = "pending")
+                startPeriodicInjection()
             } else {
                 Logger.Hook.e(TAG, "Failed to hook any candidate class", null)
             }
@@ -100,6 +105,7 @@ class BluetoothScanHook(
 
                     Logger.Hook.i(TAG, "Hooked ${clazz.name}.${method.name} " +
                             "(${method.parameterTypes.size} params)")
+                    hookInstanceCachingMethods(clazz)
                     return true
                 } else {
                     Logger.Hook.d(TAG, "No suitable method in $className")
@@ -135,6 +141,29 @@ class BluetoothScanHook(
         return withByteArray.maxByOrNull { it.parameterCount }
     }
 
+    /** 扫描注册/启动时也缓存实例，便于无真实设备时定时注入 */
+    private fun hookInstanceCachingMethods(clazz: Class<*>) {
+        val methodNames = setOf("registerScanner", "startScan", "stopScan", "flushPendingBatchResults")
+        var current: Class<*>? = clazz
+        while (current != null) {
+            for (m in current.declaredMethods) {
+                if (m.name !in methodNames) continue
+                try {
+                    m.isAccessible = true
+                    XposedBridge.hookMethod(m, object : XC_MethodHook() {
+                        override fun beforeHookedMethod(param: MethodHookParam) {
+                            cachedScanInstance = param.thisObject
+                        }
+                    })
+                    Logger.Hook.d(TAG, "Instance cache hook: ${current.name}.${m.name}")
+                } catch (e: Throwable) {
+                    Logger.Hook.d(TAG, "Skip instance cache hook ${m.name}: ${e.message}")
+                }
+            }
+            current = current.superclass
+        }
+    }
+
     // ── afterHookedMethod 处理 ───────────────────────────────
 
     /**
@@ -143,6 +172,8 @@ class BluetoothScanHook(
     private fun handleScanResult(param: XC_MethodHook.MethodHookParam) {
         val args = param.args ?: return
         if (args.isEmpty()) return
+
+        cachedScanInstance = param.thisObject
 
         // ---- 1. 按类型提取参数 ----
         var scanRecordBytes: ByteArray? = null
@@ -178,17 +209,7 @@ class BluetoothScanHook(
         val addressType: Int   = tryIntArg(args, si - 5, 0)
 
         // ---- 3. Throttled prefs reload (max once per second) ----
-        val now = System.currentTimeMillis()
-        if (now - lastPrefReloadMs > 1000) {
-            try {
-                prefs.reload()
-                cachedCaptureEnabled = prefs.getBoolean("capture_enabled", false)
-                cachedGlobalEnabled = prefs.getBoolean("global_enabled", true)
-                lastPrefReloadMs = now
-            } catch (_: Throwable) {
-                // keep stale cache
-            }
-        }
+        reloadPrefsIfNeeded()
 
         if (cachedCaptureEnabled) {
             val capLine = buildCaptureLine(
@@ -244,6 +265,49 @@ class BluetoothScanHook(
      */
     private fun sendStatusLine(fieldsResolved: String) {
         CaptureSocket.sendLine(buildStatusLine(fieldsResolved))
+    }
+
+    // ── 定时注入（不依赖周围是否有真实 BLE 设备） ─────────────
+
+    @Volatile
+    private var periodicInjectorStarted = false
+
+    private fun startPeriodicInjection() {
+        if (periodicInjectorStarted) return
+        periodicInjectorStarted = true
+        Thread({
+            Logger.Hook.i(TAG, "Periodic injection thread started")
+            while (true) {
+                try {
+                    Thread.sleep(500L)
+                    reloadPrefsIfNeeded(force = true)
+                    val instance = cachedScanInstance ?: continue
+                    if (cachedGlobalEnabled) {
+                        injectVirtualDevicesAdaptive(instance)
+                    }
+                } catch (_: InterruptedException) {
+                    break
+                } catch (e: Throwable) {
+                    Logger.Hook.d(TAG, "Periodic injection tick error: ${e.message}")
+                }
+            }
+        }, "BTHook-PeriodicInject").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun reloadPrefsIfNeeded(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastPrefReloadMs <= 1000) return
+        try {
+            prefs.reload()
+            cachedCaptureEnabled = prefs.getBoolean("capture_enabled", false)
+            cachedGlobalEnabled = prefs.getBoolean("global_enabled", true)
+            lastPrefReloadMs = now
+        } catch (_: Throwable) {
+            // keep stale cache
+        }
     }
 
     // ── 注入（自适应字段解析） ────────────────────────────────

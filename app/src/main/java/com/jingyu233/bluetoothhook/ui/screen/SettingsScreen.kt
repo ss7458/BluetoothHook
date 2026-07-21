@@ -30,12 +30,13 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = viewModel()
 ) {
     val settings by viewModel.settings.collectAsState()
-    val hookStatus by viewModel.hookStatus.collectAsState()
     val deviceCount by viewModel.deviceCount.collectAsState()
     val isTestingConnection by viewModel.isTestingConnection.collectAsState()
     val connectionTestResult by viewModel.connectionTestResult.collectAsState()
     val importExportStatus by viewModel.importExportStatus.collectAsState()
     val syncLogs by viewModel.syncLogs.collectAsState()
+
+    var showClearDataDialog by remember { mutableStateOf(false) }
 
     // 文件选择器：导入 JSON
     val importLauncher = rememberLauncherForActivityResult(
@@ -70,27 +71,6 @@ fun SettingsScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Hook状态部分
-            item {
-                SettingsSection(title = "Hook状态") {
-                    HookStatusDetailCard(
-                        status = hookStatus,
-                        deviceCount = deviceCount,
-                        onRefresh = { viewModel.refreshHookStatus() }
-                    )
-                }
-            }
-
-            // 抓包设置部分
-            item {
-                SettingsSection(title = "抓包设置") {
-                    CaptureSettingsCard(
-                        captureEnabled = settings.captureEnabled,
-                        onCaptureToggle = { viewModel.setCaptureEnabled(it) }
-                    )
-                }
-            }
-
             // WebDAV同步部分
             item {
                 SettingsSection(title = "WebDAV 同步") {
@@ -117,7 +97,8 @@ fun SettingsScreen(
                     ImportExportCard(
                         onImport = { importLauncher.launch(arrayOf("application/json", "*/*")) },
                         onExport = { exportLauncher.launch("bluetooth_hook_devices.json") },
-                        onClearData = { viewModel.clearAllData() },
+                        onClearData = { showClearDataDialog = true },
+                        deviceCount = deviceCount,
                         status = importExportStatus,
                         onClearStatus = { viewModel.clearImportExportStatus() }
                     )
@@ -131,6 +112,30 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+
+    if (showClearDataDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearDataDialog = false },
+            icon = { Icon(Icons.Default.Delete, contentDescription = null) },
+            title = { Text("清理所有数据") },
+            text = { Text("确定要删除全部 $deviceCount 个虚拟设备吗？此操作不可撤销。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.clearAllData()
+                        showClearDataDialog = false
+                    }
+                ) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearDataDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
     }
 }
 
@@ -147,89 +152,6 @@ fun SettingsSection(
             modifier = Modifier.padding(bottom = 8.dp)
         )
         content()
-    }
-}
-
-@Composable
-fun CaptureSettingsCard(
-    captureEnabled: Boolean,
-    onCaptureToggle: (Boolean) -> Unit
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "扫描抓包 (Capture)",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
-                )
-                Text(
-                    text = "开启后捕获蓝牙扫描过程的通信数据",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Switch(
-                checked = captureEnabled,
-                onCheckedChange = onCaptureToggle
-            )
-        }
-    }
-}
-
-@Composable
-fun HookStatusDetailCard(
-    status: String,
-    deviceCount: Int,
-    onRefresh: () -> Unit
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "当前状态: $status",
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "已配置 $deviceCount 个虚拟设备",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                IconButton(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, "刷新")
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-            Divider()
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Text(
-                text = "使用说明",
-                style = MaterialTheme.typography.titleSmall
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "1. 在LSPosed管理器中启用本模块\n" +
-                        "2. 确保模块作用域包含\"系统框架\"和\"com.android.bluetooth\"\n" +
-                        "3. 重启系统或重启蓝牙服务\n" +
-                        "4. Hook激活后，虚拟设备会自动出现在蓝牙扫描结果中",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
     }
 }
 
@@ -293,7 +215,7 @@ fun WebDavSettingsCard(
                 trailingIcon = {
                     IconButton(onClick = { passwordVisible = !passwordVisible }) {
                         Icon(
-                            if (passwordVisible) Icons.Default.Warning else Icons.Default.Lock,
+                            if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                             if (passwordVisible) "隐藏密码" else "显示密码"
                         )
                     }
@@ -453,6 +375,7 @@ fun ImportExportCard(
     onImport: () -> Unit,
     onExport: () -> Unit,
     onClearData: () -> Unit,
+    deviceCount: Int,
     status: String?,
     onClearStatus: () -> Unit
 ) {
@@ -474,7 +397,7 @@ fun ImportExportCard(
                     onClick = onImport,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Icon(Icons.Default.Send, null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.FileOpen, null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("导入")
                 }
@@ -542,7 +465,7 @@ fun ImportExportCard(
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "• 导出：将当前所有设备配置保存为JSON文件\n• 导入：从JSON文件加载设备配置（追加模式）",
+                text = "• 导出：将当前 $deviceCount 个设备保存为 JSON\n• 导入：从 JSON 加载设备（追加模式，ID 冲突时自动生成新 ID）",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -575,11 +498,10 @@ fun AboutCard() {
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "• 向系统蓝牙扫描结果注入虚拟BLE设备\n" +
-                        "• 自定义MAC地址、RSSI和广播数据\n" +
-                        "• 支持动态广播数据（传感器模拟）\n" +
-                        "• WebDAV配置同步\n" +
-                        "• 导入/导出JSON配置",
+                text = "• 向系统蓝牙扫描结果注入虚拟 BLE 设备\n" +
+                        "• 自定义 MAC 地址、RSSI 和广播数据\n" +
+                        "• 扫描抓包与 CSV 导出\n" +
+                        "• 导入/导出 JSON 配置",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

@@ -17,14 +17,6 @@ class ScanResultBuilder(private val classLoader: ClassLoader) {
 
     /**
      * 构造ScanResult对象
-     *
-     * @param macAddress MAC地址 (格式: AA:BB:CC:DD:EE:FF)
-     * @param rssi 信号强度 (-100 to 0)
-     * @param advDataHex 广播数据十六进制字符串
-     * @param scanResponseHex 扫描响应数据十六进制字符串（可选）
-     * @param useExtendedAdvertising 是否使用扩展广播
-     * @param deviceName 设备名称（可选，会添加到广播数据中）
-     * @return ScanResult对象，失败返回null
      */
     fun buildScanResult(
         macAddress: String,
@@ -35,7 +27,6 @@ class ScanResultBuilder(private val classLoader: ClassLoader) {
         deviceName: String? = null
     ): Any? {
         return try {
-            // 1. 获取BluetoothAdapter并创建BluetoothDevice
             val adapter = BluetoothAdapter.getDefaultAdapter()
             if (adapter == null) {
                 Logger.Hook.w(TAG, "BluetoothAdapter null, skip inject")
@@ -43,66 +34,57 @@ class ScanResultBuilder(private val classLoader: ClassLoader) {
             }
             val device = adapter.getRemoteDevice(macAddress)
 
-            // 2. 合并广播数据和扫描响应数据
-            val combinedDataHex = if (scanResponseHex.isNotEmpty()) {
-                advDataHex + scanResponseHex
-            } else {
-                advDataHex
-            }
-            val advBytes = hexStringToByteArray(combinedDataHex)
-
-            // 3. 使用ScanRecord.parseFromBytes解析广播数据
             val scanRecordClass = XposedHelpers.findClass(
                 "android.bluetooth.le.ScanRecord",
                 classLoader
             )
-            val scanRecord = XposedHelpers.callStaticMethod(
-                scanRecordClass,
-                "parseFromBytes",
-                advBytes
-            )
 
-            // 4. 构造ScanResult对象
-            // 根据逆向代码line 431的构造器签名:
-            // new ScanResult(device, eventType, primaryPhy, secondaryPhy,
-            //               advertisingSid, txPower, rssi, periodicAdvInt,
-            //               scanRecord, timestamp)
+            // Legacy：广播与扫描响应分别解析；Extended：仅使用合并后的广播数据
+            val advBytes = hexStringToByteArray(advDataHex)
+            val scanRecord = if (useExtendedAdvertising || scanResponseHex.isEmpty()) {
+                XposedHelpers.callStaticMethod(
+                    scanRecordClass,
+                    "parseFromBytes",
+                    advBytes
+                )
+            } else {
+                val advOnlyRecord = XposedHelpers.callStaticMethod(
+                    scanRecordClass,
+                    "parseFromBytes",
+                    advBytes
+                )
+                attachScanResponse(scanRecordClass, advOnlyRecord, hexStringToByteArray(scanResponseHex))
+            }
+
             val scanResultClass = XposedHelpers.findClass(
                 "android.bluetooth.le.ScanResult",
                 classLoader
             )
 
             val timestampNanos = SystemClock.elapsedRealtimeNanos()
-
-            // 确定事件类型（随 SDK 版本变化）
-            // Android 14 (SDK 34)+ 使用新的常量值
             val isSdk34Plus = android.os.Build.VERSION.SDK_INT >= 34
             val eventType = if (useExtendedAdvertising) {
-                if (isSdk34Plus) 0x01 else 0x00  // EXTENDED_ADVERTISING
+                if (isSdk34Plus) 0x01 else 0x00
             } else {
-                if (isSdk34Plus) 0x13 else 0x10  // LEGACY_ADVERTISING
+                if (isSdk34Plus) 0x13 else 0x10
             }
-
-            // SDK 34+ 的 txPower 默认值不同
             val txPower = if (isSdk34Plus) 127 else 0
 
-            // 尝试使用完整参数的构造器
             try {
                 XposedHelpers.newInstance(
                     scanResultClass,
-                    device,                  // BluetoothDevice
-                    eventType,               // eventType (SDK-dependent)
-                    1,                       // primaryPhy: 1 = LE 1M
-                    if (useExtendedAdvertising) 1 else 0,  // secondaryPhy: 1 = LE 1M, 0 = None
-                    255,                     // advertisingSid: 255 = Not periodic
-                    txPower,                 // txPower (SDK-dependent)
-                    rssi,                    // rssi
-                    0,                       // periodicAdvInt: 0 = None
-                    scanRecord,              // ScanRecord
-                    timestampNanos           // timestamp
+                    device,
+                    eventType,
+                    1,
+                    if (useExtendedAdvertising) 1 else 0,
+                    255,
+                    txPower,
+                    rssi,
+                    0,
+                    scanRecord,
+                    timestampNanos
                 )
             } catch (e: Exception) {
-                // 降级：使用简化构造器（兼容旧版本Android）
                 XposedHelpers.newInstance(
                     scanResultClass,
                     device,
@@ -118,75 +100,63 @@ class ScanResultBuilder(private val classLoader: ClassLoader) {
         }
     }
 
-    /**
-     * 十六进制字符串转字节数组
-     */
+    /** 尝试将扫描响应附加到 ScanRecord（反射写字段） */
+    private fun attachScanResponse(
+        scanRecordClass: Class<*>,
+        scanRecord: Any?,
+        scanResponseBytes: ByteArray
+    ): Any? {
+        if (scanRecord == null || scanResponseBytes.isEmpty()) return scanRecord
+        for (fieldName in arrayOf("mScanResponse", "scanResponse")) {
+            try {
+                XposedHelpers.setObjectField(scanRecord, fieldName, scanResponseBytes)
+                return scanRecord
+            } catch (_: Throwable) {
+                // try next field name
+            }
+        }
+        // 无法附加扫描响应时回退：仅使用广播段（避免错误拼接导致 parse 失败）
+        Logger.Hook.w(TAG, "Could not attach scan response, using advertisement only")
+        return scanRecord
+    }
+
     private fun hexStringToByteArray(hexString: String): ByteArray {
         val cleanHex = hexString.replace(" ", "").replace(":", "")
+        if (cleanHex.isEmpty()) return ByteArray(0)
         val len = cleanHex.length
         val data = ByteArray(len / 2)
-
         var i = 0
         while (i < len) {
             data[i / 2] = ((Character.digit(cleanHex[i], 16) shl 4) +
                     Character.digit(cleanHex[i + 1], 16)).toByte()
             i += 2
         }
-
         return data
     }
 
-    /**
-     * 生成标准BLE广播数据
-     * 包含Flags和Complete Local Name
-     */
     fun generateStandardAdvData(deviceName: String): String {
         val nameBytes = deviceName.toByteArray(Charsets.UTF_8)
         val nameLength = nameBytes.size
-
-        // Flags AD结构 (3 bytes): 02 01 06
-        // - Length: 0x02
-        // - Type: 0x01 (Flags)
-        // - Data: 0x06 (LE General Discoverable Mode, BR/EDR Not Supported)
         val flags = "020106"
-
-        // Complete Local Name AD结构
-        // - Length: nameLength + 1
-        // - Type: 0x09 (Complete Local Name)
-        // - Data: name bytes
         val nameHex = StringBuilder()
-        nameHex.append(String.format("%02X", nameLength + 1)) // Length
-        nameHex.append("09")                                   // Type
+        nameHex.append(String.format("%02X", nameLength + 1))
+        nameHex.append("09")
         nameBytes.forEach { byte ->
             nameHex.append(String.format("%02X", byte))
         }
-
         return flags + nameHex.toString()
     }
 
-    /**
-     * 验证MAC地址格式
-     */
     fun isValidMacAddress(mac: String): Boolean {
         return mac.matches(Regex("^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$"))
     }
 
-    /**
-     * 验证RSSI范围
-     */
     fun isValidRssi(rssi: Int): Boolean {
         return rssi in -100..0
     }
 
-    /**
-     * 验证广播数据长度（Legacy BLE最多31字节，Extended最多254字节）
-     */
     fun isValidAdvDataLength(hexString: String, extended: Boolean = false): Boolean {
         val byteCount = hexString.replace(" ", "").replace(":", "").length / 2
-        return if (extended) {
-            byteCount <= 254
-        } else {
-            byteCount <= 31
-        }
+        return if (extended) byteCount <= 254 else byteCount <= 31
     }
 }

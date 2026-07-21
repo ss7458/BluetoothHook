@@ -136,54 +136,6 @@ class ConfigBridge(private val context: Context) {
     }
 
     /**
-     * 设置Hook状态（由Hook进程写入，仅用于UI显示）
-     * 注意：这个方法可能需要使用不同的SharedPreferences文件
-     */
-    fun setHookStatus(status: String) {
-        val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-        prefs.edit()
-            .putString("hook_status", status)
-            .putLong("hook_status_updated", System.currentTimeMillis())
-            .apply()
-    }
-
-    /**
-     * 获取Hook状态
-     * 优先使用 CaptureBridge 的实时 Socket 状态，回退到 SharedPreferences 标记。
-     */
-    fun getHookStatus(): String {
-        // 优先：Socket 已收到 STATUS 行
-        val bridgeStatus = CaptureBridge.hookStatus.value
-        if (bridgeStatus != null) {
-            return buildString {
-                append("Active")
-                append(" | SDK=${bridgeStatus.sdkInt}")
-                append(" | ${bridgeStatus.classFound}::${bridgeStatus.methodFound}")
-            }
-        }
-        // 回退：SP 标记
-        return try {
-            val prefs = context.getSharedPreferences("module_status", Context.MODE_PRIVATE)
-            val isActive = prefs.getBoolean("xposed_active", false)
-            val lastHookTime = prefs.getLong("last_hook_time", 0L)
-
-            if (isActive) {
-                val timeDiff = System.currentTimeMillis() - lastHookTime
-                if (timeDiff < 5 * 60 * 1000) {
-                    "Active"
-                } else {
-                    "Inactive"
-                }
-            } else {
-                "Unknown"
-            }
-        } catch (e: Exception) {
-            Logger.App.e(TAG, "Failed to read hook status", e)
-            "Unknown"
-        }
-    }
-
-    /**
      * 清空所有配置
      */
     fun clearAll() {

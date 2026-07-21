@@ -285,39 +285,35 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
      */
     fun exportDevices(uri: Uri?) {
         if (uri == null) {
-            return Result.failure(IllegalArgumentException("未选择文件"))
+            _importExportStatus.value = "导出失败: 未选择文件"
+            return
         }
 
-        return try {
-            viewModelScope.launch {
-                try {
-                    // 获取所有设备
-                    val devices = repository.getAllDevicesSnapshot()
+        viewModelScope.launch {
+            try {
+                // 获取所有设备
+                val devices = repository.getAllDevicesSnapshot()
 
-                    if (devices.isEmpty()) {
-                        _importExportStatus.value = "没有设备可导出"
-                        return@launch
-                    }
-
-                    // 序列化为 JSON
-                    val json = JsonImportExport.exportToJson(devices)
-
-                    // 写入文件
-                    getApplication<Application>().contentResolver.openOutputStream(uri)?.use { output ->
-                        output.write(json.toByteArray())
-                    } ?: throw IllegalStateException("无法打开输出流")
-
-                    _importExportStatus.value = "成功导出 ${devices.size} 个设备"
-                    Logger.App.i(TAG, "Exported ${devices.size} devices to $uri")
-
-                } catch (e: Exception) {
-                    _importExportStatus.value = "导出失败: ${e.message}"
-                    Logger.App.e(TAG, "Export failed", e)
+                if (devices.isEmpty()) {
+                    _importExportStatus.value = "没有设备可导出"
+                    return@launch
                 }
+
+                // 序列化为 JSON
+                val json = JsonImportExport.exportToJson(devices)
+
+                // 写入文件
+                getApplication<Application>().contentResolver.openOutputStream(uri)?.use { output ->
+                    output.write(json.toByteArray())
+                } ?: throw IllegalStateException("无法打开输出流")
+
+                _importExportStatus.value = "成功导出 ${devices.size} 个设备"
+                Logger.App.i(TAG, "Exported ${devices.size} devices to $uri")
+
+            } catch (e: Exception) {
+                _importExportStatus.value = "导出失败: ${e.message}"
+                Logger.App.e(TAG, "Export failed", e)
             }
-        } catch (e: Exception) {
-            Logger.App.e(TAG, "Export setup failed", e)
-            _importExportStatus.value = "导出失败: ${e.message}"
         }
     }
 

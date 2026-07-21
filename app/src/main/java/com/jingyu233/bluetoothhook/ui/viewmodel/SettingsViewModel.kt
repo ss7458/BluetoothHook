@@ -279,11 +279,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val importExportStatus: StateFlow<String?> = _importExportStatus.asStateFlow()
 
     /**
-     * 导出设备到 JSON 文件
+     * 导出设备到 JSON 文件（异步）
+     * 实际导出在协程中执行，结果通过 [importExportStatus] StateFlow 暴露。
      * @param uri 用户选择的文件 URI
-     * @return 导出的设备数量
      */
-    fun exportDevices(uri: Uri?): Result<Int> {
+    fun exportDevices(uri: Uri?) {
         if (uri == null) {
             return Result.failure(IllegalArgumentException("未选择文件"))
         }
@@ -315,10 +315,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     Logger.App.e(TAG, "Export failed", e)
                 }
             }
-            Result.success(0)
         } catch (e: Exception) {
             Logger.App.e(TAG, "Export setup failed", e)
-            Result.failure(e)
+            _importExportStatus.value = "导出失败: ${e.message}"
         }
     }
 

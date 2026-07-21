@@ -49,8 +49,8 @@ object CaptureSocket {
                 // AUTH handshake immediately after connect
                 val authBytes = "${CaptureProtocol.AUTH_PREFIX}${CaptureProtocol.AUTH_TOKEN}\n"
                     .toByteArray(Charsets.UTF_8)
-                os!!.write(authBytes)
-                os!!.flush()
+                os?.write(authBytes)
+                os?.flush()
 
                 socket = s
                 outputStream = os

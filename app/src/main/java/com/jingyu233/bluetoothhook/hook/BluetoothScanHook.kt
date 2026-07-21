@@ -255,8 +255,8 @@ class BluetoothScanHook(
      */
     private fun injectVirtualDevicesAdaptive(instance: Any) {
         try {
-            prefs.reload()
-            if (!prefs.getBoolean("global_enabled", true)) return
+            // global_enabled 已由 handleScanResult 节流缓存，无需重复 prefs.reload()
+            if (!cachedGlobalEnabled) return
 
             val scanManager = resolveScanManager(instance) ?: return
             val scannerMap  = resolveScannerMap(instance, scanManager) ?: return

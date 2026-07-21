@@ -9,7 +9,7 @@ import kotlinx.serialization.encodeToString
 /**
  * 配置桥接器
  * 负责在UI进程和Hook进程之间同步配置数据
- * 使用LSPosed的New XSharedPreferences特性（MODE_WORLD_READABLE）
+ * 使用LSPosed的XSharedPreferences特性读取配置（MODE_PRIVATE）
  */
 class ConfigBridge(private val context: Context) {
 
@@ -35,7 +35,7 @@ class ConfigBridge(private val context: Context) {
     /**
      * 从UI进程写入设备配置
      * 将Room数据库的设备列表同步到SharedPreferences
-     * 使用MODE_WORLD_READABLE允许Hook进程通过XSharedPreferences读取
+     * Hook进程通过XSharedPreferences读取此文件
      */
     fun writeDeviceConfig(devices: List<VirtualDevice>) {
         try {

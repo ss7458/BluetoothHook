@@ -121,14 +121,16 @@ class ScanResultBuilder(private val classLoader: ClassLoader) {
     }
 
     private fun hexStringToByteArray(hexString: String): ByteArray {
-        val cleanHex = hexString.replace(" ", "").replace(":", "")
+        val cleanHex = hexString.replace("\\s+".toRegex(), "")
         if (cleanHex.isEmpty()) return ByteArray(0)
-        val len = cleanHex.length
+        // Pad odd-length hex with leading zero to make it even
+        val padded = if (cleanHex.length % 2 != 0) "0$cleanHex" else cleanHex
+        val len = padded.length
         val data = ByteArray(len / 2)
         var i = 0
         while (i < len) {
-            data[i / 2] = ((Character.digit(cleanHex[i], 16) shl 4) +
-                    Character.digit(cleanHex[i + 1], 16)).toByte()
+            data[i / 2] = ((Character.digit(padded[i], 16) shl 4) +
+                    Character.digit(padded[i + 1], 16)).toByte()
             i += 2
         }
         return data

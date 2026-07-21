@@ -56,9 +56,8 @@ class SyncManager(
                 }
             }
 
-            // 更新本地数据库
-            repository.deleteAllDevices()
-            repository.addDevices(mergedDevices)
+            // 更新本地数据库（原子事务：先清空再写入）
+            repository.replaceAllDevices(mergedDevices)
 
             // 上传到远程
             val uploadResult = webDavClient.uploadDevices(mergedDevices)

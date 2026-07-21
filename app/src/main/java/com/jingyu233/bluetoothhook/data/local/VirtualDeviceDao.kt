@@ -40,6 +40,15 @@ interface VirtualDeviceDao {
     @Query("DELETE FROM virtual_devices")
     suspend fun deleteAllDevices()
 
+    @Query("DELETE FROM virtual_devices")
+    fun deleteAllDevicesSync()
+
+    @Transaction
+    suspend fun replaceAllDevicesTransaction(devices: List<VirtualDevice>) {
+        deleteAllDevicesSync()
+        insertDevices(devices)
+    }
+
     @Query("DELETE FROM virtual_devices WHERE id = :id")
     suspend fun deleteDeviceById(id: String)
 

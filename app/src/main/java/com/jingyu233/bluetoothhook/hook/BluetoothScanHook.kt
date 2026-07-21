@@ -1,5 +1,6 @@
 package com.jingyu233.bluetoothhook.hook
 
+import com.jingyu233.bluetoothhook.data.model.VirtualDevice
 import com.jingyu233.bluetoothhook.utils.Logger
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XSharedPreferences
@@ -45,6 +46,12 @@ class BluetoothScanHook(
     /** 最近一次扫描回调的 ScanController 实例，供定时注入使用 */
     @Volatile
     private var cachedScanInstance: Any? = null
+
+    // ── Cached reflection results (resolved once, reset on error) ─
+    private var cachedScanManager: Any? = null
+    private var cachedScannerMap: Any? = null
+    private var cachedScanQueue: Collection<*>? = null
+    private var resolveAttempted = false
 
     // ── Prefs reload throttling ──────────────────────────────
     private var lastPrefReloadMs = 0L
@@ -272,12 +279,16 @@ class BluetoothScanHook(
     @Volatile
     private var periodicInjectorStarted = false
 
+    @Volatile
+    private var periodicInjectorRunning = false
+
     private fun startPeriodicInjection() {
         if (periodicInjectorStarted) return
         periodicInjectorStarted = true
+        periodicInjectorRunning = true
         Thread({
             Logger.Hook.i(TAG, "Periodic injection thread started")
-            while (true) {
+            while (periodicInjectorRunning) {
                 try {
                     Thread.sleep(500L)
                     reloadPrefsIfNeeded(force = true)
@@ -286,6 +297,7 @@ class BluetoothScanHook(
                         injectVirtualDevicesAdaptive(instance)
                     }
                 } catch (_: InterruptedException) {
+                    periodicInjectorRunning = false
                     break
                 } catch (e: Throwable) {
                     Logger.Hook.d(TAG, "Periodic injection tick error: ${e.message}")
@@ -322,9 +334,19 @@ class BluetoothScanHook(
             // global_enabled 已由 handleScanResult 节流缓存，无需重复 prefs.reload()
             if (!cachedGlobalEnabled) return
 
-            val scanManager = resolveScanManager(instance) ?: return
-            val scannerMap  = resolveScannerMap(instance, scanManager) ?: return
-            val scanQueue   = resolveScanQueue(scanManager) ?: return
+            // Resolve and cache on first attempt (or after failure)
+            if (!resolveAttempted) {
+                cachedScanManager = resolveScanManager(instance)
+                if (cachedScanManager != null) {
+                    cachedScannerMap = resolveScannerMap(instance, cachedScanManager!!)
+                    cachedScanQueue = resolveScanQueue(cachedScanManager!!)
+                }
+                resolveAttempted = true
+            }
+
+            val scanManager = cachedScanManager ?: return
+            val scannerMap  = cachedScannerMap ?: return
+            val scanQueue   = cachedScanQueue ?: return
             if (scanQueue.isEmpty()) return
 
             // 优先走 VirtualDeviceInjector（保留现有注入逻辑），
@@ -350,6 +372,11 @@ class BluetoothScanHook(
                 sendStatusLine(fieldsResolved = fieldsStr)
             }
         } catch (e: Throwable) {
+            // Reset cache on error so next call retries
+            cachedScanManager = null
+            cachedScannerMap = null
+            cachedScanQueue = null
+            resolveAttempted = false
             Logger.Hook.e(TAG, "injectVirtualDevicesAdaptive error", e)
         }
     }
@@ -452,7 +479,7 @@ class BluetoothScanHook(
         if (devicesJson == "[]") return
 
         val devices = try {
-            Json.decodeFromString<List<VirtualDeviceData>>(devicesJson)
+            Json.decodeFromString<List<VirtualDevice>>(devicesJson)
         } catch (_: Throwable) { return }
 
         val enabledDevices = devices.filter { it.enabled }

@@ -1,9 +1,9 @@
 package com.jingyu233.bluetoothhook.hook
 
+import com.jingyu233.bluetoothhook.data.model.VirtualDevice
 import com.jingyu233.bluetoothhook.utils.Logger
 import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedHelpers
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.decodeFromString
 import java.util.concurrent.ConcurrentHashMap
@@ -49,7 +49,7 @@ class VirtualDeviceInjector(
 
             // 解析虚拟设备列表
             val devices = try {
-                Json.decodeFromString<List<VirtualDeviceData>>(devicesJson)
+                Json.decodeFromString<List<VirtualDevice>>(devicesJson)
             } catch (e: Exception) {
                 // 只在首次解析失败时输出错误，避免刷屏
                 Logger.Hook.e(TAG, "JSON parse error: ${e.message}\nJSON: $devicesJson", e)
@@ -80,7 +80,7 @@ class VirtualDeviceInjector(
      * 注入单个虚拟设备
      */
     private fun injectSingleDevice(
-        device: VirtualDeviceData,
+        device: VirtualDevice,
         scanQueue: Collection<*>,
         scannerMap: Any
     ) {
@@ -167,21 +167,4 @@ class VirtualDeviceInjector(
     }
 }
 
-/**
- * 虚拟设备数据模型（用于从SharedPreferences反序列化）
- * 必须与VirtualDevice的JSON序列化格式匹配
- */
-@Serializable
-data class VirtualDeviceData(
-    val id: String,
-    val name: String,
-    val mac: String,
-    val rssi: Int,
-    val advDataHex: String,
-    val intervalMs: Long,
-    val enabled: Boolean,
-    val scanResponseHex: String = "",  // 扫描响应数据
-    val useExtendedAdvertising: Boolean = false,  // 是否使用扩展广播
-    val createdAt: Long = 0L,
-    val updatedAt: Long = 0L
-)
+

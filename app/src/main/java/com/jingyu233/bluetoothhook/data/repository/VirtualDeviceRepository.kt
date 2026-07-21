@@ -75,6 +75,12 @@ class VirtualDeviceRepository(
         notifyHookProcess()
     }
 
+    suspend fun replaceAllDevices(devices: List<VirtualDevice>) = withContext(Dispatchers.IO) {
+        Logger.App.w(TAG, "Replacing all devices with ${devices.size} devices")
+        deviceDao.replaceAllDevicesTransaction(devices)
+        notifyHookProcess()
+    }
+
     /**
      * 获取所有设备的快照（非 Flow，用于导出等一次性操作）
      */

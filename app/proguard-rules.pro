@@ -72,8 +72,6 @@
 -keep class com.jingyu233.bluetoothhook.data.model.DynamicDataRule { *; }
 -keep class com.jingyu233.bluetoothhook.data.model.RuleType { *; }
 -keep class com.jingyu233.bluetoothhook.data.model.AppSettings { *; }
--keep class com.jingyu233.bluetoothhook.hook.VirtualDeviceData { *; }
-
 # Keep all model classes (accessed via reflection)
 -keep class com.jingyu233.bluetoothhook.data.model.** { *; }
 

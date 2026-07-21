@@ -230,8 +230,16 @@ class DeviceEditorViewModel(
             errors["advData"] = "广播数据只能包含十六进制字符"
         }
 
+        if (currentDevice.advDataHex.isNotEmpty() && currentDevice.advDataHex.length % 2 != 0) {
+            errors["advData"] = "广播数据长度必须为偶数（每2个字符=1字节）"
+        }
+
         if (!currentDevice.scanResponseHex.matches(Regex("^[0-9A-Fa-f]*$"))) {
-            errors["advData"] = "扫描响应数据只能包含十六进制字符"
+            errors["scanResponse"] = "扫描响应数据只能包含十六进制字符"
+        }
+
+        if (currentDevice.scanResponseHex.isNotEmpty() && currentDevice.scanResponseHex.length % 2 != 0) {
+            errors["scanResponse"] = "扫描响应长度必须为偶数（每2个字符=1字节）"
         }
 
         // 根据模式验证数据长度

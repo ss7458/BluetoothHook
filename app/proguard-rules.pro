@@ -60,7 +60,7 @@
 }
 
 # Keep serialization metadata
--keepattributes *Annotation*, InnerClasses
+-keepattributes *Annotation*, InnerClasses, Signature
 -dontnote kotlinx.serialization.**
 
 # Keep Kotlin serialization classes
@@ -73,6 +73,9 @@
 -keep class com.jingyu233.bluetoothhook.data.model.RuleType { *; }
 -keep class com.jingyu233.bluetoothhook.data.model.AppSettings { *; }
 -keep class com.jingyu233.bluetoothhook.hook.VirtualDeviceData { *; }
+
+# Keep all model classes (accessed via reflection)
+-keep class com.jingyu233.bluetoothhook.data.model.** { *; }
 
 # ========== Reflection-Accessed Classes ==========
 # Keep ScanResultBuilder (uses Android reflection)
@@ -134,6 +137,9 @@
 -keep class com.jingyu233.bluetoothhook.data.bridge.ConfigBridge {
     public <methods>;
 }
+
+# Keep all bridge classes (accessed via reflection / string class names)
+-keep class com.jingyu233.bluetoothhook.data.bridge.** { *; }
 
 # Keep Repository
 -keep class com.jingyu233.bluetoothhook.data.repository.VirtualDeviceRepository {

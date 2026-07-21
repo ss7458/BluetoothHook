@@ -37,11 +37,9 @@ class ConfigBridge(private val context: Context) {
      * 将Room数据库的设备列表同步到SharedPreferences
      * 使用MODE_WORLD_READABLE允许Hook进程通过XSharedPreferences读取
      */
-    @Suppress("DEPRECATION")
     fun writeDeviceConfig(devices: List<VirtualDevice>) {
         try {
-            // 使用MODE_WORLD_READABLE允许跨进程访问（LSPosed支持）
-            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_WORLD_READABLE)
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
 
             // 序列化设备列表为JSON
             val devicesJson = json.encodeToString(devices)
@@ -53,10 +51,10 @@ class ConfigBridge(private val context: Context) {
                 .putLong(KEY_LAST_UPDATED, System.currentTimeMillis())
                 .commit() // 立即同步写入
 
-            Logger.App.d(TAG, "Wrote ${devices.size} devices to SharedPreferences (MODE_WORLD_READABLE)")
+            Logger.App.d(TAG, "Wrote ${devices.size} devices to SharedPreferences (MODE_PRIVATE)")
 
         } catch (e: SecurityException) {
-            Logger.App.e(TAG, "MODE_WORLD_READABLE not supported - LSPosed not enabled?", e)
+            Logger.App.e(TAG, "MODE_PRIVATE — SecurityException unexpected, check LSPosed?", e)
         } catch (e: Exception) {
             Logger.App.e(TAG, "Failed to write device config", e)
         }
@@ -65,10 +63,9 @@ class ConfigBridge(private val context: Context) {
     /**
      * 设置全局开关状态
      */
-    @Suppress("DEPRECATION")
     fun setGlobalEnabled(enabled: Boolean) {
         try {
-            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_WORLD_READABLE)
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             prefs.edit()
                 .putBoolean(KEY_GLOBAL_ENABLED, enabled)
                 .putLong(KEY_LAST_UPDATED, System.currentTimeMillis())
@@ -84,10 +81,9 @@ class ConfigBridge(private val context: Context) {
     /**
      * 获取全局开关状态
      */
-    @Suppress("DEPRECATION")
     fun getGlobalEnabled(): Boolean {
         return try {
-            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_WORLD_READABLE)
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             prefs.getBoolean(KEY_GLOBAL_ENABLED, true)
         } catch (e: Exception) {
             Logger.App.e(TAG, "Failed to get global enabled state", e)
@@ -98,10 +94,9 @@ class ConfigBridge(private val context: Context) {
     /**
      * 设置抓包开关状态
      */
-    @Suppress("DEPRECATION")
     fun setCaptureEnabled(enabled: Boolean) {
         try {
-            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_WORLD_READABLE)
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             prefs.edit()
                 .putBoolean(KEY_CAPTURE_ENABLED, enabled)
                 .putLong(KEY_LAST_UPDATED, System.currentTimeMillis())
@@ -117,10 +112,9 @@ class ConfigBridge(private val context: Context) {
     /**
      * 获取抓包开关状态
      */
-    @Suppress("DEPRECATION")
     fun isCaptureEnabled(): Boolean {
         return try {
-            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_WORLD_READABLE)
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             prefs.getBoolean(KEY_CAPTURE_ENABLED, false)
         } catch (e: Exception) {
             Logger.App.e(TAG, "Failed to get capture enabled state", e)
@@ -131,10 +125,9 @@ class ConfigBridge(private val context: Context) {
     /**
      * 获取配置最后更新时间
      */
-    @Suppress("DEPRECATION")
     fun getLastUpdatedTime(): Long {
         return try {
-            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_WORLD_READABLE)
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             prefs.getLong(KEY_LAST_UPDATED, 0L)
         } catch (e: Exception) {
             Logger.App.e(TAG, "Failed to get last updated time", e)
@@ -155,17 +148,26 @@ class ConfigBridge(private val context: Context) {
     }
 
     /**
-     * 获取Hook状态（UI进程读取）
-     * 从module_status SharedPreferences读取激活标记
+     * 获取Hook状态
+     * 优先使用 CaptureBridge 的实时 Socket 状态，回退到 SharedPreferences 标记。
      */
     fun getHookStatus(): String {
+        // 优先：Socket 已收到 STATUS 行
+        val bridgeStatus = CaptureBridge.hookStatus.value
+        if (bridgeStatus != null) {
+            return buildString {
+                append("Active")
+                append(" | SDK=${bridgeStatus.sdkInt}")
+                append(" | ${bridgeStatus.classFound}::${bridgeStatus.methodFound}")
+            }
+        }
+        // 回退：SP 标记
         return try {
             val prefs = context.getSharedPreferences("module_status", Context.MODE_PRIVATE)
             val isActive = prefs.getBoolean("xposed_active", false)
             val lastHookTime = prefs.getLong("last_hook_time", 0L)
 
             if (isActive) {
-                // 检查最后Hook时间是否在合理范围内(5分钟)
                 val timeDiff = System.currentTimeMillis() - lastHookTime
                 if (timeDiff < 5 * 60 * 1000) {
                     "Active"
@@ -184,10 +186,9 @@ class ConfigBridge(private val context: Context) {
     /**
      * 清空所有配置
      */
-    @Suppress("DEPRECATION")
     fun clearAll() {
         try {
-            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_WORLD_READABLE)
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             prefs.edit().clear().commit()
 
             val appPrefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)

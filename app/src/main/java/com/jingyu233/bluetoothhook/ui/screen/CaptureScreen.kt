@@ -50,6 +50,7 @@ fun CaptureScreen(
     viewModel: CaptureViewModel = viewModel()
 ) {
     val records by viewModel.captureRecords.collectAsState()
+    val serverError by viewModel.serverError.collectAsState()
     val hookStatus by viewModel.hookStatus.collectAsState()
     val isListening by viewModel.isListening.collectAsState()
     val captureEnabled by viewModel.captureEnabled.collectAsState()
@@ -94,9 +95,40 @@ fun CaptureScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            // 错误提示卡片
+            serverError?.let { error ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "抓包服务启动失败：$error",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
+            }
+
             // Hook 状态卡片
             HookCaptureStatusCard(
                 status = hookStatus,
+                serverError = serverError,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp)
             )
 
@@ -206,7 +238,7 @@ fun CaptureScreen(
                     ) {
                         itemsIndexed(
                             items = records,
-                            key = { index, record -> "${record.timestamp}_$index" }
+                            key = { _, record -> record.id }
                         ) { _, record ->
                             CaptureRecordCard(record = record)
                         }
@@ -255,6 +287,7 @@ private fun PulsingDot() {
 @Composable
 private fun HookCaptureStatusCard(
     status: CaptureBridge.HookStatus?,
+    serverError: String?,
     modifier: Modifier = Modifier
 ) {
     Card(modifier = modifier.fillMaxWidth()) {
@@ -281,19 +314,7 @@ private fun HookCaptureStatusCard(
             Divider()
             Spacer(modifier = Modifier.height(12.dp))
 
-            if (status == null) {
-                Text(
-                    text = "未连接 / 等待蓝牙扫描",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "请确保模块已激活并重启蓝牙服务",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
+            if (status != null) {
                 val classOk = status.classFound != "NONE"
                 val methodOk = status.methodFound != "NONE"
                 val fieldsOk = status.fieldsResolved != "NONE"
@@ -316,6 +337,18 @@ private fun HookCaptureStatusCard(
                     label = "Fields",
                     value = status.fieldsResolved,
                     ok = fieldsOk
+                )
+            } else if (serverError != null) {
+                Text(
+                    text = "抓包服务异常，请查看上方提示",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text(
+                    text = "等待蓝牙扫描…（如长时间无数据，请重启蓝牙）",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

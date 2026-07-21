@@ -8,6 +8,7 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class CaptureRecord(
+    val id: Long = 0L,
     val timestamp: Long,
     val mac: String,
     val rssi: Int,

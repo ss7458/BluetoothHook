@@ -8,13 +8,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.jingyu233.bluetoothhook.data.bridge.CaptureBridge
 import com.jingyu233.bluetoothhook.data.bridge.CaptureBridge.HookStatus
-import com.jingyu233.bluetoothhook.data.bridge.ConfigBridge
 import com.jingyu233.bluetoothhook.data.local.SettingsDataStore
 import com.jingyu233.bluetoothhook.data.model.CaptureRecord
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
@@ -23,30 +23,22 @@ import kotlinx.coroutines.launch
  */
 class CaptureViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val configBridge = ConfigBridge(application)
     private val settingsDataStore = SettingsDataStore(application)
-
-    init {
-        CaptureBridge.startServer()
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        CaptureBridge.stopServer()
-    }
 
     // 直接暴露 CaptureBridge 的 StateFlow
     val captureRecords: StateFlow<List<CaptureRecord>> = CaptureBridge.captureRecords
     val hookStatus: StateFlow<HookStatus?> = CaptureBridge.hookStatus
     val isListening: StateFlow<Boolean> = CaptureBridge.isListening
 
-    // 抓包开关（读写 ConfigBridge）
-    private val _captureEnabled = MutableStateFlow(configBridge.isCaptureEnabled())
-    val captureEnabled: StateFlow<Boolean> = _captureEnabled.asStateFlow()
+    // 抓包开关从 DataStore 派生（Application 的 collector 负责同步到 ConfigBridge）
+    val captureEnabled: StateFlow<Boolean> = settingsDataStore.settingsFlow
+        .map { it.captureEnabled }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    // 服务端错误信息
+    val serverError: StateFlow<String?> = CaptureBridge.serverError
 
     fun setCaptureEnabled(enabled: Boolean) {
-        _captureEnabled.value = enabled
-        configBridge.setCaptureEnabled(enabled)
         viewModelScope.launch {
             settingsDataStore.toggleCaptureEnabled(enabled)
         }

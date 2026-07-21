@@ -37,6 +37,10 @@ class ScanResultBuilder(private val classLoader: ClassLoader) {
         return try {
             // 1. 获取BluetoothAdapter并创建BluetoothDevice
             val adapter = BluetoothAdapter.getDefaultAdapter()
+            if (adapter == null) {
+                Logger.Hook.w(TAG, "BluetoothAdapter null, skip inject")
+                return null
+            }
             val device = adapter.getRemoteDevice(macAddress)
 
             // 2. 合并广播数据和扫描响应数据

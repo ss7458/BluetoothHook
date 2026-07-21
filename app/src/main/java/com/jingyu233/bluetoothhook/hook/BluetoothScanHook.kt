@@ -42,6 +42,11 @@ class BluetoothScanHook(
     private val resolvedFields: MutableSet<String> = mutableSetOf()
     private var hasInjectedOnce = false
 
+    // ── Prefs reload throttling ──────────────────────────────
+    private var lastPrefReloadMs = 0L
+    private var cachedCaptureEnabled = false
+    private var cachedGlobalEnabled = true
+
     // ── 初始化 ───────────────────────────────────────────────
 
     fun init() {
@@ -172,13 +177,20 @@ class BluetoothScanHook(
         val primaryPhy: Int    = tryIntArg(args, si - 4, 1)
         val addressType: Int   = tryIntArg(args, si - 5, 0)
 
-        // ---- 3. Capture（若配置启用） ----
-        val captureEnabled = try {
-            prefs.reload()
-            prefs.getBoolean("capture_enabled", false)
-        } catch (_: Throwable) { false }
+        // ---- 3. Throttled prefs reload (max once per second) ----
+        val now = System.currentTimeMillis()
+        if (now - lastPrefReloadMs > 1000) {
+            try {
+                prefs.reload()
+                cachedCaptureEnabled = prefs.getBoolean("capture_enabled", false)
+                cachedGlobalEnabled = prefs.getBoolean("global_enabled", true)
+                lastPrefReloadMs = now
+            } catch (_: Throwable) {
+                // keep stale cache
+            }
+        }
 
-        if (captureEnabled) {
+        if (cachedCaptureEnabled) {
             val capLine = buildCaptureLine(
                 timestampMs = System.currentTimeMillis(),
                 mac = address,
@@ -191,8 +203,10 @@ class BluetoothScanHook(
             CaptureSocket.sendLine(capLine)
         }
 
-        // ---- 4. 注入虚拟设备 ----
-        injectVirtualDevicesAdaptive(param.thisObject)
+        // ---- 4. 注入虚拟设备（使用缓存判断） ----
+        if (cachedGlobalEnabled) {
+            injectVirtualDevicesAdaptive(param.thisObject)
+        }
     }
 
     /** 安全的 int 参数提取，越界/类型不匹配时返回默认值 */
@@ -323,14 +337,18 @@ class BluetoothScanHook(
                 resolvedFields.add("getRegularScanQueue")
                 return q
             }
-        } catch (_: Throwable) { }
+        } catch (e: Throwable) {
+            Logger.Hook.d(TAG, "reflect/op failed: getRegularScanQueue – ${e.message}")
+        }
         try {
             val q = XposedHelpers.callMethod(scanManager, "getScanQueue") as? Collection<*>
             if (q != null) {
                 resolvedFields.add("getScanQueue")
                 return q
             }
-        } catch (_: Throwable) { }
+        } catch (e: Throwable) {
+            Logger.Hook.d(TAG, "reflect/op failed: getScanQueue – ${e.message}")
+        }
         return null
     }
 
@@ -340,7 +358,10 @@ class BluetoothScanHook(
             val v = XposedHelpers.getObjectField(obj, fieldName)
             if (v != null) resolvedFields.add(fieldName)
             v
-        } catch (_: Throwable) { null }
+        } catch (e: Throwable) {
+            Logger.Hook.d(TAG, "reflect/op failed: getObjectField($fieldName) – ${e.message}")
+            null
+        }
     }
 
     /** 安全的 getIntField，成功时记录字段名 */
@@ -349,7 +370,10 @@ class BluetoothScanHook(
             val v = XposedHelpers.getIntField(obj, fieldName)
             resolvedFields.add(fieldName)
             v
-        } catch (_: Throwable) { null }
+        } catch (e: Throwable) {
+            Logger.Hook.d(TAG, "reflect/op failed: getIntField($fieldName) – ${e.message}")
+            null
+        }
     }
 
     // ── 自适应逐客户端投递（fallback） ───────────────────────
@@ -392,7 +416,10 @@ class BluetoothScanHook(
                         // scannerApp: scannerMap.getById(scannerId)
                         val scannerApp = try {
                             XposedHelpers.callMethod(scannerMap, "getById", scannerId)
-                        } catch (_: Throwable) { null } ?: continue
+                        } catch (e: Throwable) {
+                            Logger.Hook.d(TAG, "reflect/op failed: getById – ${e.message}")
+                            null
+                        } ?: continue
 
                         // callback: mCallback / callback
                         val callback = tryGetField(scannerApp, "mCallback")
@@ -400,9 +427,13 @@ class BluetoothScanHook(
                             ?: continue
 
                         XposedHelpers.callMethod(callback, "onScanResult", scanResult)
-                    } catch (_: Throwable) { /* skip failed client */ }
+                    } catch (e: Throwable) {
+                        Logger.Hook.d(TAG, "reflect/op failed: per-client delivery – ${e.message}")
+                    }
                 }
-            } catch (_: Throwable) { /* skip failed device */ }
+            } catch (e: Throwable) {
+                Logger.Hook.d(TAG, "reflect/op failed: per-device injection – ${e.message}")
+            }
         }
     }
 }

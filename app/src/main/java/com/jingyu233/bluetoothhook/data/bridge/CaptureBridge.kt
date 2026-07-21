@@ -1,11 +1,13 @@
 package com.jingyu233.bluetoothhook.data.bridge
 
+import com.jingyu233.bluetoothhook.CaptureProtocol
 import com.jingyu233.bluetoothhook.data.model.CaptureRecord
 import com.jingyu233.bluetoothhook.utils.Logger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,6 +18,8 @@ import java.io.InputStreamReader
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.SocketTimeoutException
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 抓包数据桥接器
@@ -50,6 +54,9 @@ object CaptureBridge {
     private val _isListening = MutableStateFlow(false)
     val isListening: StateFlow<Boolean> = _isListening.asStateFlow()
 
+    private val _serverError = MutableStateFlow<String?>(null)
+    val serverError: StateFlow<String?> = _serverError.asStateFlow()
+
     // -------------------- Hook 状态模型 --------------------
 
     /**
@@ -74,8 +81,14 @@ object CaptureBridge {
     private var serverSocket: ServerSocket? = null
     private var serverJob: Job? = null
 
+    /** 自增记录 ID */
+    private val nextRecordId = AtomicLong(1L)
+
     /** 线程安全的记录缓存 */
     private val recordsCache = mutableListOf<CaptureRecord>()
+
+    /** 防抖 emit 标志 */
+    private val isEmitPending = AtomicBoolean(false)
 
     // -------------------- 公开 API --------------------
 
@@ -99,7 +112,20 @@ object CaptureBridge {
                 val ss = ServerSocket()
                 serverSocket = ss
                 ss.reuseAddress = true
-                ss.bind(java.net.InetSocketAddress(InetAddress.getByName("127.0.0.1"), PORT))
+
+                // 绑定端口，失败时设置错误状态
+                try {
+                    ss.bind(java.net.InetSocketAddress(InetAddress.getByName("127.0.0.1"), PORT))
+                } catch (e: Exception) {
+                    _serverError.value = e.message
+                    _isListening.value = false
+                    serverSocket = null
+                    ss.close()
+                    Logger.App.e(TAG, "Failed to bind server socket", e)
+                    return@launch
+                }
+
+                _serverError.value = null
                 ss.soTimeout = ACCEPT_TIMEOUT_MS.toInt()
 
                 _isListening.value = true
@@ -111,23 +137,36 @@ object CaptureBridge {
                         val client = ss.accept()
                         Logger.App.d(TAG, "Client connected: ${client.inetAddress}")
 
-                        // 每个客户端用独立协程处理
+                        // 鉴权：读取客户端第一行，必须为 AUTH|<token>
+                        val reader = BufferedReader(
+                            InputStreamReader(client.getInputStream(), Charsets.UTF_8)
+                        )
+                        val authLine = try {
+                            reader.readLine()
+                        } catch (e: Exception) {
+                            null
+                        }
+                        val expectedAuth = "${CaptureProtocol.AUTH_PREFIX}${CaptureProtocol.AUTH_TOKEN}"
+                        if (authLine != expectedAuth) {
+                            Logger.App.w(TAG, "Auth failed: '$authLine', closing connection")
+                            try { client.close() } catch (_: Exception) {}
+                            continue
+                        }
+
+                        // 鉴权通过，每个客户端用独立协程处理后续 STATUS/CAP 行
                         launch {
                             try {
-                                client.use { socket ->
-                                    val reader = BufferedReader(
-                                        InputStreamReader(socket.getInputStream(), Charsets.UTF_8)
-                                    )
-                                    var line: String? = null
-                                    while (isActive && reader.readLine().also { line = it } != null) {
-                                        line?.let { processLine(it) }
-                                    }
+                                var line: String? = null
+                                while (isActive && reader.readLine().also { line = it } != null) {
+                                    line?.let { processLine(it) }
                                 }
                             } catch (e: java.net.SocketException) {
                                 // 客户端正常断开
                                 Logger.App.d(TAG, "Client disconnected")
                             } catch (e: Exception) {
                                 Logger.App.e(TAG, "Client handler error", e)
+                            } finally {
+                                try { client.close() } catch (_: Exception) {}
                             }
                         }
                     } catch (_: SocketTimeoutException) {
@@ -139,8 +178,10 @@ object CaptureBridge {
                 // 协程被取消，正常退出
                 throw e
             } catch (e: Exception) {
+                _serverError.value = e.message ?: "Server error"
                 Logger.App.e(TAG, "Server error", e)
             } catch (e: Throwable) {
+                _serverError.value = e.message ?: "Unexpected server error"
                 Logger.App.e(TAG, "Unexpected server error", e)
             } finally {
                 serverSocket?.close()
@@ -183,8 +224,8 @@ object CaptureBridge {
      */
     private fun processLine(line: String) {
         when {
-            line.startsWith("STATUS|") -> parseStatus(line)
-            line.startsWith("CAP|") -> parseCapture(line)
+            line.startsWith(CaptureProtocol.STATUS_PREFIX) -> parseStatus(line)
+            line.startsWith(CaptureProtocol.CAP_PREFIX) -> parseCapture(line)
             else -> Logger.App.v(TAG, "Unknown line ignored: $line")
         }
     }
@@ -212,6 +253,7 @@ object CaptureBridge {
             return
         }
         val record = CaptureRecord(
+            id = nextRecordId.getAndIncrement(),
             timestamp = parts[1].toLongOrNull() ?: System.currentTimeMillis(),
             mac = parts[2],
             rssi = parts[3].toIntOrNull() ?: 0,
@@ -229,7 +271,19 @@ object CaptureBridge {
             if (recordsCache.size > MAX_RECORDS) {
                 recordsCache.removeAt(0)
             }
-            _captureRecords.value = recordsCache.toList()
+        }
+        scheduleEmit()
+    }
+
+    /** 防抖 emit：最多每 300ms 向 _captureRecords 发射一次 */
+    private fun scheduleEmit() {
+        if (isEmitPending.getAndSet(true)) return
+        scope.launch {
+            delay(300L)
+            synchronized(recordsCache) {
+                _captureRecords.value = recordsCache.toList()
+            }
+            isEmitPending.set(false)
         }
     }
 }

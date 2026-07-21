@@ -98,7 +98,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         _settings.value = _settings.value.copy(captureEnabled = enabled)
         viewModelScope.launch {
             settingsDataStore.toggleCaptureEnabled(enabled)
-            configBridge.setCaptureEnabled(enabled)
             Logger.App.i(TAG, "Capture enabled set to: $enabled")
         }
     }

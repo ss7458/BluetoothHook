@@ -28,9 +28,9 @@ object HookStatusHelper {
             return Status(activation, summary, detail)
         }
         return if (moduleActive) {
-            Status(Activation.Unknown, "模块已加载，等待蓝牙扫描…", null)
+            Status(Activation.Active, "模块已加载，等待蓝牙扫描…", null)
         } else {
-            Status(Activation.Unknown, "Hook 状态未知", null)
+            Status(Activation.Inactive, "模块未加载", null)
         }
     }
 

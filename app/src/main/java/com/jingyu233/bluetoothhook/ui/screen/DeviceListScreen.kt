@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jingyu233.bluetoothhook.data.model.VirtualDevice
 import com.jingyu233.bluetoothhook.ui.components.HookStatusSection
+import com.jingyu233.bluetoothhook.ui.components.RestartBluetoothCard
 import com.jingyu233.bluetoothhook.ui.viewmodel.DeviceListViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -64,6 +65,11 @@ fun DeviceListScreen(
                 status = hookStatus,
                 onRefresh = { viewModel.refreshHookStatus() },
                 modifier = Modifier.padding(16.dp)
+            )
+
+            // 重启蓝牙提示
+            RestartBluetoothCard(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
 
             // 全局开关

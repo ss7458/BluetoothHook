@@ -1,6 +1,9 @@
 package com.jingyu233.bluetoothhook.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ExpandLess
@@ -21,7 +24,72 @@ import com.jingyu233.bluetoothhook.data.bridge.CaptureBridge
 import com.jingyu233.bluetoothhook.data.bridge.HookStatusHelper
 
 /**
- * 统一的 Hook 状态展示（首页唯一入口，抓包页不再重复）
+ * 抓包页顶部的紧凑状态条：一行、红/绿区分、简要文字 + 刷新按钮
+ */
+@Composable
+fun HookStatusStrip(
+    status: HookStatusHelper.Status,
+    onRefresh: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val (barColor, dotColor, label) = when (status.activation) {
+        HookStatusHelper.Activation.Active -> Triple(
+            MaterialTheme.colorScheme.primaryContainer,
+            MaterialTheme.colorScheme.primary,
+            status.summary
+        )
+        HookStatusHelper.Activation.Inactive -> Triple(
+            MaterialTheme.colorScheme.errorContainer,
+            MaterialTheme.colorScheme.error,
+            status.summary
+        )
+        HookStatusHelper.Activation.Unknown -> Triple(
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant,
+            status.summary
+        )
+    }
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = barColor
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 状态小圆点
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(dotColor)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            IconButton(onClick = onRefresh, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    Icons.Default.Refresh,
+                    contentDescription = "刷新",
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 统一的 Hook 状态展示（首页，含详情展开）
  */
 @Composable
 fun HookStatusSection(

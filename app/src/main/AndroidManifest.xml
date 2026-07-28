@@ -61,13 +61,6 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
-
-        <!-- BLE扫描前台服务（创建scan session供虚拟设备注入） -->
-        <service
-            android:name=".ble.BleScanService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="connectedDevice" />
     </application>
 
 </manifest>

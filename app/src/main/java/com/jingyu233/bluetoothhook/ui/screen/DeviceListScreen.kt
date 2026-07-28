@@ -1,5 +1,10 @@
 package com.jingyu233.bluetoothhook.ui.screen
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -10,8 +15,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jingyu233.bluetoothhook.data.model.VirtualDevice
 import com.jingyu233.bluetoothhook.ui.components.HookStatusSection
@@ -30,8 +37,24 @@ fun DeviceListScreen(
     val globalEnabled by viewModel.globalEnabled.collectAsState()
     val hookStatus by viewModel.hookStatus.collectAsState()
     val bleScanning by viewModel.bleScanning.collectAsState()
+    val context = LocalContext.current
 
     var showDeleteDialog by remember { mutableStateOf<VirtualDevice?>(null) }
+
+    // BLE 扫描权限请求
+    val blePermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+    } else {
+        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+    val blePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val allGranted = permissions.values.all { it }
+        if (allGranted) {
+            viewModel.toggleBleScan()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -102,7 +125,22 @@ fun DeviceListScreen(
                     }
                     Switch(
                         checked = bleScanning,
-                        onCheckedChange = { viewModel.toggleBleScan() }
+                        onCheckedChange = {
+                            if (bleScanning) {
+                                // 关闭扫描不需要权限
+                                viewModel.toggleBleScan()
+                            } else {
+                                // 开启扫描需要检查权限
+                                val hasPermission = blePermissions.all { perm ->
+                                    ContextCompat.checkSelfPermission(context, perm) == PackageManager.PERMISSION_GRANTED
+                                }
+                                if (hasPermission) {
+                                    viewModel.toggleBleScan()
+                                } else {
+                                    blePermissionLauncher.launch(blePermissions)
+                                }
+                            }
+                        }
                     )
                 }
             }

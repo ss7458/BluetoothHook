@@ -1,15 +1,9 @@
 package com.jingyu233.bluetoothhook.ui.viewmodel
 
 import android.app.Application
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
-import android.os.Build
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.jingyu233.bluetoothhook.ble.BleScanService
+import com.jingyu233.bluetoothhook.ble.BleScanManager
 import com.jingyu233.bluetoothhook.data.bridge.CaptureBridge
 import com.jingyu233.bluetoothhook.data.bridge.ConfigBridge
 import com.jingyu233.bluetoothhook.data.bridge.HookStatusHelper
@@ -42,29 +36,12 @@ class DeviceListViewModel(application: Application) : AndroidViewModel(applicati
     )
     val hookStatus: StateFlow<HookStatusHelper.Status> = _hookStatus.asStateFlow()
 
-    private val _bleScanning = MutableStateFlow(BleScanService.isRunning())
+    private val _bleScanning = MutableStateFlow(BleScanManager.isScanning)
     val bleScanning: StateFlow<Boolean> = _bleScanning.asStateFlow()
-
-    private val scanStateReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == BleScanService.ACTION_SCAN_STATE_CHANGED) {
-                _bleScanning.value = intent.getBooleanExtra(BleScanService.EXTRA_IS_SCANNING, false)
-            }
-        }
-    }
 
     init {
         _globalEnabled.value = configBridge.getGlobalEnabled()
         refreshHookStatus()
-
-        // 注册BLE扫描状态广播（Android 13+ 需要 RECEIVER_NOT_EXPORTED 标志）
-        val filter = IntentFilter(BleScanService.ACTION_SCAN_STATE_CHANGED)
-        ContextCompat.registerReceiver(
-            application,
-            scanStateReceiver,
-            filter,
-            ContextCompat.RECEIVER_NOT_EXPORTED
-        )
 
         viewModelScope.launch {
             CaptureBridge.hookStatus.collect {
@@ -82,36 +59,12 @@ class DeviceListViewModel(application: Application) : AndroidViewModel(applicati
         Logger.App.i(TAG, "Global enabled set to: $enabled")
     }
 
+    /**
+     * 切换BLE扫描（调用方已确保权限已授予）
+     */
     fun toggleBleScan() {
         val app = getApplication<Application>()
-        if (_bleScanning.value) {
-            BleScanService.stop(app)
-            Logger.App.i(TAG, "BLE scan stopped by user")
-        } else {
-            BleScanService.start(app)
-            Logger.App.i(TAG, "BLE scan started by user")
-        }
+        val result = BleScanManager.toggle(app)
+        _bleScanning.value = result
+        Logger.App.i(TAG, "BLE scan toggled: $result")
     }
-
-    fun toggleDevice(device: VirtualDevice) {
-        viewModelScope.launch {
-            repository.toggleDevice(device)
-            Logger.App.d(TAG, "Toggled device: ${device.name}")
-        }
-    }
-
-    fun deleteDevice(device: VirtualDevice) {
-        viewModelScope.launch {
-            repository.deleteDevice(device)
-            Logger.App.i(TAG, "Deleted device: ${device.name}")
-        }
-    }
-
-    fun refreshHookStatus() {
-        _hookStatus.value = HookStatusHelper.resolve(
-            CaptureBridge.hookStatus.value,
-            HookStatusHelper.isModuleActive(getApplication())
-        )
-        Logger.App.d(TAG, "Refreshed hook status: ${_hookStatus.value.summary}")
-    }
-}

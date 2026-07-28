@@ -8,7 +8,6 @@ import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
 
 /**
@@ -383,8 +382,8 @@ class BluetoothScanHook(
                 val text = fallbackFile.readText()
                 val json = Json { ignoreUnknownKeys = true }
                 val obj = json.decodeFromString<Map<String, JsonElement>>(text)
-                val fileGlobal = (obj["global_enabled"] as? JsonPrimitive)?.booleanOrNull
-                val fileCapture = (obj["capture_enabled"] as? JsonPrimitive)?.booleanOrNull
+                val fileGlobal = obj["global_enabled"]?.toString()?.toBooleanOrNull()
+                val fileCapture = obj["capture_enabled"]?.toString()?.toBooleanOrNull()
                 if (fileGlobal != null || fileCapture != null) {
                     if (fileGlobal != null) cachedGlobalEnabled = fileGlobal
                     if (fileCapture != null) cachedCaptureEnabled = fileCapture

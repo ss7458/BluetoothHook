@@ -5,6 +5,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Build
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.jingyu233.bluetoothhook.ble.BleScanService
@@ -55,9 +57,14 @@ class DeviceListViewModel(application: Application) : AndroidViewModel(applicati
         _globalEnabled.value = configBridge.getGlobalEnabled()
         refreshHookStatus()
 
-        // 注册BLE扫描状态广播
+        // 注册BLE扫描状态广播（Android 13+ 需要 RECEIVER_NOT_EXPORTED 标志）
         val filter = IntentFilter(BleScanService.ACTION_SCAN_STATE_CHANGED)
-        application.registerReceiver(scanStateReceiver, filter)
+        ContextCompat.registerReceiver(
+            application,
+            scanStateReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
 
         viewModelScope.launch {
             CaptureBridge.hookStatus.collect {

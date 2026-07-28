@@ -11,3 +11,6 @@ local.properties
 
 # Kotlin build files
 .kotlin/
+
+# Deepwork state files
+.slim/deepwork/

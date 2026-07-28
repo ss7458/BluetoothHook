@@ -11,6 +11,10 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * 虚拟设备注入器
  * 负责管理虚拟设备列表并将它们注入到扫描结果中
+ *
+ * 设备列表来源优先级：
+ * 1. TCP 同步的配置缓存（CaptureSocket.configCache.devicesJson）
+ * 2. XSharedPreferences（传统方式，作为 fallback）
  */
 class VirtualDeviceInjector(
     private val scanResultBuilder: ScanResultBuilder,
@@ -19,6 +23,8 @@ class VirtualDeviceInjector(
     companion object {
         private val TAG = Logger.Tags.HOOK_INJECTOR
     }
+
+    private val json = Json { ignoreUnknownKeys = true }
 
     // 上次注入时间戳，用于控制注入频率
     private val lastInjectTime = ConcurrentHashMap<String, Long>()
@@ -38,20 +44,16 @@ class VirtualDeviceInjector(
         scanQueue: Collection<*>
     ) {
         try {
-            // 重新加载配置
-            prefs.reload()
-
-            // 读取虚拟设备列表
-            val devicesJson = prefs.getString("devices", "[]") ?: "[]"
+            // 读取虚拟设备列表（优先 TCP 同步配置，fallback XSharedPreferences）
+            val devicesJson = readDevicesJson()
             if (devicesJson == "[]") {
                 return // 没有配置虚拟设备，静默返回
             }
 
             // 解析虚拟设备列表
             val devices = try {
-                Json.decodeFromString<List<VirtualDevice>>(devicesJson)
+                json.decodeFromString<List<VirtualDevice>>(devicesJson)
             } catch (e: Exception) {
-                // 只在首次解析失败时输出错误，避免刷屏
                 Logger.Hook.e(TAG, "JSON parse error: ${e.message}\nJSON: $devicesJson", e)
                 return
             }
@@ -74,6 +76,29 @@ class VirtualDeviceInjector(
         } catch (e: Throwable) {
             Logger.Hook.e(TAG, "Error in injectDevices", e)
         }
+    }
+
+    /**
+     * 读取设备列表 JSON。
+     * 优先级：TCP 同步配置 > XSharedPreferences
+     */
+    private fun readDevicesJson(): String {
+        // 1) 优先使用 TCP 同步的配置缓存
+        val synced = CaptureSocket.configCache
+        if (synced.devicesJson != "[]" && synced.timestamp > 0L) {
+            return synced.devicesJson
+        }
+
+        // 2) fallback: XSharedPreferences
+        try {
+            prefs.reload()
+            val fromPrefs = prefs.getString("devices", "[]") ?: "[]"
+            if (fromPrefs != "[]") {
+                return fromPrefs
+            }
+        } catch (_: Throwable) { }
+
+        return "[]"
     }
 
     /**
@@ -166,5 +191,3 @@ class VirtualDeviceInjector(
         }
     }
 }
-
-

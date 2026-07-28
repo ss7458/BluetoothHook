@@ -56,6 +56,8 @@ class ConfigBridge(private val context: Context) {
 
             // 确保文件对Hook进程可读
             ensurePrefsWorldReadable()
+            // 写入文件回退（/data/local/tmp/bthook_config.json）
+            writeFallbackConfigFile()
 
         } catch (e: SecurityException) {
             Logger.App.e(TAG, "MODE_PRIVATE — SecurityException unexpected, check LSPosed?", e)
@@ -77,6 +79,7 @@ class ConfigBridge(private val context: Context) {
 
             // 确保SharedPreferences文件对Hook进程可读（XSharedPreferences需要）
             ensurePrefsWorldReadable()
+            writeFallbackConfigFile()
 
             Logger.App.d(TAG, "Set global_enabled = $enabled")
 
@@ -111,6 +114,7 @@ class ConfigBridge(private val context: Context) {
 
             // 确保文件对Hook进程可读
             ensurePrefsWorldReadable()
+            writeFallbackConfigFile()
 
             Logger.App.d(TAG, "Set capture_enabled = $enabled")
 
@@ -146,6 +150,19 @@ class ConfigBridge(private val context: Context) {
     }
 
     /**
+     * 获取设备列表 JSON（供 TCP 配置同步使用）
+     */
+    fun getDevicesJson(): String {
+        return try {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.getString(KEY_DEVICES, "[]") ?: "[]"
+        } catch (e: Exception) {
+            Logger.App.e(TAG, "Failed to get devices JSON", e)
+            "[]"
+        }
+    }
+
+    /**
      * 清空所有配置
      */
     fun clearAll() {
@@ -157,6 +174,9 @@ class ConfigBridge(private val context: Context) {
             appPrefs.edit().clear().apply()
 
             Logger.App.w(TAG, "Cleared all configuration")
+
+            // 覆盖回退文件，防止 Hook 进程读到过期配置
+            writeFallbackConfigFile()
         } catch (e: Exception) {
             Logger.App.e(TAG, "Failed to clear config", e)
         }
@@ -178,6 +198,32 @@ class ConfigBridge(private val context: Context) {
             }
         } catch (e: Exception) {
             Logger.App.w(TAG, "Failed to make prefs world-readable: ${e.message}")
+        }
+    }
+
+    /**
+     * 将配置写入文件回退位置（/data/local/tmp/bthook_config.json）。
+     * 此位置通常对系统进程可读，作为 XSharedPreferences 和 TCP 同步的补充。
+     * Hook 端在 TCP 配置不可用时尝试读取此文件。
+     */
+    fun writeFallbackConfigFile() {
+        try {
+            val fallbackDir = File("/data/local/tmp")
+            if (!fallbackDir.exists() || !fallbackDir.canWrite()) return
+
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            val devicesJson = prefs.getString(KEY_DEVICES, "[]") ?: "[]"
+            val globalEnabled = prefs.getBoolean(KEY_GLOBAL_ENABLED, true)
+            val captureEnabled = prefs.getBoolean(KEY_CAPTURE_ENABLED, false)
+
+            val configJson = """{"global_enabled":$globalEnabled,"capture_enabled":$captureEnabled,"devices":$devicesJson}"""
+            val fallbackFile = File(fallbackDir, "bthook_config.json")
+            fallbackFile.writeText(configJson, Charsets.UTF_8)
+            fallbackFile.setReadable(true, false)
+
+            Logger.App.d(TAG, "Fallback config written to ${fallbackFile.absolutePath}")
+        } catch (e: Exception) {
+            Logger.App.w(TAG, "Failed to write fallback config: ${e.message}")
         }
     }
 }

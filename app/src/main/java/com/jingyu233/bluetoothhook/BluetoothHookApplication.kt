@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 class BluetoothHookApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        CaptureBridge._appContext = this
         CaptureBridge.startServer()
         val settings = SettingsDataStore(this)
         val config = ConfigBridge(this)

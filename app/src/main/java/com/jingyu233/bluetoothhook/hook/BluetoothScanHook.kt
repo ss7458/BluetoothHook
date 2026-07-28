@@ -7,6 +7,9 @@ import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import java.io.File
 
 /**
  * 蓝牙扫描Hook核心类（自适应版本）
@@ -25,9 +28,24 @@ class BluetoothScanHook(
 
         /** 候选类，按顺序尝试 */
         private val CANDIDATE_CLASSES = arrayOf(
+            // AOSP / 原生
             "com.android.bluetooth.le_scan.ScanController",
             "com.android.bluetooth.le_scan.TransitionalScanHelper",
-            "com.android.bluetooth.gatt.ScanManager"
+            "com.android.bluetooth.gatt.ScanManager",
+            // 小米 HyperOS
+            "com.android.bluetooth.le_scan.ScanControllerWrapper",
+            "com.android.bluetooth.le_scan.BluetoothLeScannerImpl",
+            // OPPO / ColorOS
+            "com.android.bluetooth.le_scan.OplusScanController",
+            "com.android.bluetooth.le_scan.OplusLeScanManager",
+            // 三星 OneUI
+            "com.android.bluetooth.le_scan.SemScanController",
+            "com.android.bluetooth.le_scan.SemLeScanManager",
+            // 华为 HarmonyOS / EMUI
+            "com.android.bluetooth.le_scan.HwScanController",
+            "com.android.bluetooth.le_scan.HwLeScanManager",
+            // 通用 fallback
+            "com.android.bluetooth.le_scan.LeScanManager"
         )
 
         private const val METHOD_NAME = "onScanResultInternal"
@@ -64,6 +82,10 @@ class BluetoothScanHook(
         try {
             Logger.Hook.i(TAG, "Initializing BluetoothScanHook (adaptive mode)")
 
+            // 记录 TCP 配置缓存状态
+            val synced = CaptureSocket.configCache
+            Logger.Hook.i(TAG, "Config cache at init: globalEnabled=${synced.globalEnabled}, captureEnabled=${synced.captureEnabled}, devices=${if (synced.devicesJson == "[]") "none" else "present"}, timestamp=${synced.timestamp}")
+
             scanResultBuilder = ScanResultBuilder(classLoader)
             virtualDeviceInjector = VirtualDeviceInjector(scanResultBuilder, prefs)
 
@@ -75,6 +97,7 @@ class BluetoothScanHook(
                 startPeriodicInjection()
             } else {
                 Logger.Hook.e(TAG, "Failed to hook any candidate class", null)
+                Logger.Hook.e(TAG, "Tried classes: ${CANDIDATE_CLASSES.joinToString(", ")}", null)
             }
         } catch (e: Throwable) {
             Logger.Hook.e(TAG, "Fatal init error", e)
@@ -173,6 +196,9 @@ class BluetoothScanHook(
 
     // ── afterHookedMethod 处理 ───────────────────────────────
 
+    /** 统计：记录 handleScanResult 被调用的次数 */
+    private var scanResultCallCount = 0
+
     /**
      * 按参数类型而非固定位置提取真实扫描结果，然后执行 Capture + 注入。
      */
@@ -180,7 +206,13 @@ class BluetoothScanHook(
         val args = param.args ?: return
         if (args.isEmpty()) return
 
+        scanResultCallCount++
         cachedScanInstance = param.thisObject
+
+        // 每 100 次记录一次统计日志
+        if (scanResultCallCount % 100 == 1) {
+            Logger.Hook.i(TAG, "handleScanResult called #$scanResultCallCount, args=${args.size}, class=${param.thisObject?.javaClass?.name}")
+        }
 
         // ---- 1. 按类型提取参数 ----
         var scanRecordBytes: ByteArray? = null
@@ -288,13 +320,25 @@ class BluetoothScanHook(
         periodicInjectorRunning = true
         Thread({
             Logger.Hook.i(TAG, "Periodic injection thread started")
+            var tickCount = 0
             while (periodicInjectorRunning) {
                 try {
                     Thread.sleep(500L)
+                    tickCount++
                     reloadPrefsIfNeeded(force = true)
-                    val instance = cachedScanInstance ?: continue
+                    val instance = cachedScanInstance
+                    if (instance == null) {
+                        if (tickCount % 20 == 0) { // 每 10 秒
+                            Logger.Hook.d(TAG, "Periodic tick #$tickCount: cachedScanInstance is null, waiting for scan session")
+                        }
+                        continue
+                    }
                     if (cachedGlobalEnabled) {
                         injectVirtualDevicesAdaptive(instance)
+                    } else {
+                        if (tickCount % 20 == 0) {
+                            Logger.Hook.d(TAG, "Periodic tick #$tickCount: global_enabled=false, skipping injection")
+                        }
                     }
                 } catch (_: InterruptedException) {
                     periodicInjectorRunning = false
@@ -312,18 +356,44 @@ class BluetoothScanHook(
     private fun reloadPrefsIfNeeded(force: Boolean = false) {
         val now = System.currentTimeMillis()
         if (!force && now - lastPrefReloadMs <= 1000) return
+
+        // 1) 优先使用 TCP 同步的配置（绕过 XSharedPreferences SELinux 问题）
+        val synced = CaptureSocket.configCache
+        cachedCaptureEnabled = synced.captureEnabled
+        cachedGlobalEnabled = synced.globalEnabled
+        lastPrefReloadMs = now
+        var prefsSource = "tcp"
+
+        // 2) 尝试 XSharedPreferences 作为 fallback
         try {
             prefs.reload()
-            val newCapture = prefs.getBoolean("capture_enabled", false)
-            val newGlobal = prefs.getBoolean("global_enabled", true)
-            cachedCaptureEnabled = newCapture
-            cachedGlobalEnabled = newGlobal
-            lastPrefReloadMs = now
-        } catch (e: Throwable) {
-            // XSharedPreferences 在 Android 10+ 上可能因文件权限问题失败
-            // 不再静默保留旧缓存——至少记录日志
-            Logger.Hook.w(TAG, "Prefs reload failed (will keep stale cache): ${e.message}")
-        }
+            val prefsCapture = prefs.getBoolean("capture_enabled", cachedCaptureEnabled)
+            val prefsGlobal = prefs.getBoolean("global_enabled", cachedGlobalEnabled)
+            if (prefsCapture != false || prefsGlobal != true) {
+                cachedCaptureEnabled = prefsCapture
+                cachedGlobalEnabled = prefsGlobal
+                prefsSource = "xsp"
+            }
+        } catch (e: Throwable) { }
+
+        // 3) 尝试文件回退（/data/local/tmp/bthook_config.json）
+        try {
+            val fallbackFile = File("/data/local/tmp/bthook_config.json")
+            if (fallbackFile.exists()) {
+                val text = fallbackFile.readText()
+                val json = Json { ignoreUnknownKeys = true }
+                val obj = json.decodeFromString<Map<String, JsonElement>>(text)
+                val fileGlobal = (obj["global_enabled"] as? JsonPrimitive)?.booleanOrNull
+                val fileCapture = (obj["capture_enabled"] as? JsonPrimitive)?.booleanOrNull
+                if (fileGlobal != null || fileCapture != null) {
+                    if (fileGlobal != null) cachedGlobalEnabled = fileGlobal
+                    if (fileCapture != null) cachedCaptureEnabled = fileCapture
+                    prefsSource = "file"
+                }
+            }
+        } catch (e: Throwable) { }
+
+        Logger.Hook.d(TAG, "Config reloaded: source=$prefsSource, global=$cachedGlobalEnabled, capture=$cachedCaptureEnabled")
     }
 
     // ── 注入（自适应字段解析） ────────────────────────────────
@@ -336,7 +406,10 @@ class BluetoothScanHook(
     private fun injectVirtualDevicesAdaptive(instance: Any) {
         try {
             // global_enabled 已由 handleScanResult 节流缓存，无需重复 prefs.reload()
-            if (!cachedGlobalEnabled) return
+            if (!cachedGlobalEnabled) {
+                Logger.Hook.d(TAG, "injectVirtualDevicesAdaptive skipped: global_enabled=false")
+                return
+            }
 
             // Resolve and cache on first attempt (or after failure)
             if (!resolveAttempted) {
@@ -346,12 +419,31 @@ class BluetoothScanHook(
                     cachedScanQueue = resolveScanQueue(cachedScanManager!!)
                 }
                 resolveAttempted = true
+                Logger.Hook.i(TAG, "Resolution result: scanManager=${cachedScanManager != null}, scannerMap=${cachedScannerMap != null}, scanQueue=${cachedScanQueue?.size ?: "null"}")
             }
 
-            val scanManager = cachedScanManager ?: return
-            val scannerMap  = cachedScannerMap ?: return
-            val scanQueue   = cachedScanQueue ?: return
-            if (scanQueue.isEmpty()) return
+            val scanManager = cachedScanManager
+            val scannerMap  = cachedScannerMap
+            val scanQueue   = cachedScanQueue
+
+            if (scanManager == null) {
+                Logger.Hook.d(TAG, "Inject skip: scanManager not resolved")
+                return
+            }
+            if (scannerMap == null) {
+                Logger.Hook.d(TAG, "Inject skip: scannerMap not resolved")
+                return
+            }
+            if (scanQueue == null) {
+                Logger.Hook.d(TAG, "Inject skip: scanQueue not resolved")
+                return
+            }
+            if (scanQueue.isEmpty()) {
+                Logger.Hook.d(TAG, "Inject skip: scanQueue is empty (no apps scanning)")
+                return
+            }
+
+            Logger.Hook.d(TAG, "Injecting to ${scanQueue.size} scan clients...")
 
             // 优先走 VirtualDeviceInjector（保留现有注入逻辑），
             // 失败时用自适应字段名逐客户端投递作为 fallback

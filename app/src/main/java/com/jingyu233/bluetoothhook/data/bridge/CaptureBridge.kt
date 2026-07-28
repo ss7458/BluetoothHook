@@ -15,8 +15,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.io.OutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
+import java.net.Socket
 import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -80,6 +82,10 @@ object CaptureBridge {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var serverSocket: ServerSocket? = null
     private var serverJob: Job? = null
+
+    /** App 进程的 Application Context，由 BluetoothHookApplication.onCreate 设置 */
+    @Volatile
+    var _appContext: android.content.Context? = null
 
     /** 自增记录 ID */
     private val nextRecordId = AtomicLong(1L)
@@ -153,9 +159,12 @@ object CaptureBridge {
                             continue
                         }
 
-                        // 鉴权通过，每个客户端用独立协程处理后续 STATUS/CAP 行
+                        // 鉴权通过 → 先推送配置行，再处理 STATUS/CAP 行
                         launch {
                             try {
+                                // 推送当前配置给客户端（绕过 XSharedPreferences）
+                                pushConfigToClient(client)
+
                                 var line: String? = null
                                 while (isActive && reader.readLine().also { line = it } != null) {
                                     line?.let { processLine(it) }
@@ -227,6 +236,43 @@ object CaptureBridge {
             line.startsWith(CaptureProtocol.STATUS_PREFIX) -> parseStatus(line)
             line.startsWith(CaptureProtocol.CAP_PREFIX) -> parseCapture(line)
             else -> Logger.App.v(TAG, "Unknown line ignored: $line")
+        }
+    }
+
+    /**
+     * AUTH 鉴权通过后，向客户端推送当前配置行。
+     * 格式：CFG|key|value，以 CFG|END 结尾。
+     * 客户端（CaptureSocket）解析后缓存到 configCache，
+     * 完全绕过 XSharedPreferences 的 SELinux 跨进程读取问题。
+     */
+    private fun pushConfigToClient(client: Socket) {
+        try {
+            val os: OutputStream = client.getOutputStream()
+            val appContext = _appContext ?: run {
+                Logger.App.w(TAG, "pushConfigToClient: appContext not set, skipping config push")
+                return
+            }
+            val configBridge = ConfigBridge(appContext)
+
+            // global_enabled
+            val globalEnabled = configBridge.getGlobalEnabled()
+            os.write("CFG|global_enabled|$globalEnabled\n".toByteArray(Charsets.UTF_8))
+
+            // capture_enabled
+            val captureEnabled = configBridge.isCaptureEnabled()
+            os.write("CFG|capture_enabled|$captureEnabled\n".toByteArray(Charsets.UTF_8))
+
+            // devices JSON
+            val devicesJson = configBridge.getDevicesJson()
+            os.write("CFG|devices|$devicesJson\n".toByteArray(Charsets.UTF_8))
+
+            // 终止标记
+            os.write("CFG|END\n".toByteArray(Charsets.UTF_8))
+            os.flush()
+
+            Logger.App.d(TAG, "Config pushed to client: global=$globalEnabled, capture=$captureEnabled, devices=${if (devicesJson == "[]") "none" else "present"}")
+        } catch (e: Exception) {
+            Logger.App.e(TAG, "Failed to push config to client", e)
         }
     }
 

@@ -29,6 +29,7 @@ fun DeviceListScreen(
     val devices by viewModel.devices.collectAsState(initial = emptyList())
     val globalEnabled by viewModel.globalEnabled.collectAsState()
     val hookStatus by viewModel.hookStatus.collectAsState()
+    val bleScanning by viewModel.bleScanning.collectAsState()
 
     var showDeleteDialog by remember { mutableStateOf<VirtualDevice?>(null) }
 
@@ -71,6 +72,40 @@ fun DeviceListScreen(
             RestartBluetoothCard(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
+
+            // BLE 扫描开关（启动App内扫描，创建scan session供虚拟设备注入）
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "App 内扫描",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (bleScanning)
+                                "BLE扫描运行中，虚拟设备可被投递到其他App"
+                            else
+                                "开启后App自行扫描BLE，无需外部软件触发",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = bleScanning,
+                        onCheckedChange = { viewModel.toggleBleScan() }
+                    )
+                }
+            }
 
             // 全局开关
             Card(

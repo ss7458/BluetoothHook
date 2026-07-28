@@ -314,11 +314,15 @@ class BluetoothScanHook(
         if (!force && now - lastPrefReloadMs <= 1000) return
         try {
             prefs.reload()
-            cachedCaptureEnabled = prefs.getBoolean("capture_enabled", false)
-            cachedGlobalEnabled = prefs.getBoolean("global_enabled", true)
+            val newCapture = prefs.getBoolean("capture_enabled", false)
+            val newGlobal = prefs.getBoolean("global_enabled", true)
+            cachedCaptureEnabled = newCapture
+            cachedGlobalEnabled = newGlobal
             lastPrefReloadMs = now
-        } catch (_: Throwable) {
-            // keep stale cache
+        } catch (e: Throwable) {
+            // XSharedPreferences 在 Android 10+ 上可能因文件权限问题失败
+            // 不再静默保留旧缓存——至少记录日志
+            Logger.Hook.w(TAG, "Prefs reload failed (will keep stale cache): ${e.message}")
         }
     }
 

@@ -97,6 +97,9 @@ object Logger {
         // Sync
         const val SYNC = "BTHook:Sync"
 
+        // Service
+        const val SERVICE = "BTHook:Service"
+
         // UI Screen
         const val UI_SCREEN_DEVICE_LIST = "BTHook:UI:Screen:DeviceList"
         const val UI_SCREEN_DEVICE_EDITOR = "BTHook:UI:Screen:DeviceEditor"

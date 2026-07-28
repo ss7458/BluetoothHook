@@ -5,6 +5,7 @@ import com.jingyu233.bluetoothhook.data.model.VirtualDevice
 import com.jingyu233.bluetoothhook.utils.Logger
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
+import java.io.File
 
 /**
  * 配置桥接器
@@ -53,6 +54,9 @@ class ConfigBridge(private val context: Context) {
 
             Logger.App.d(TAG, "Wrote ${devices.size} devices to SharedPreferences (MODE_PRIVATE)")
 
+            // 确保文件对Hook进程可读
+            ensurePrefsWorldReadable()
+
         } catch (e: SecurityException) {
             Logger.App.e(TAG, "MODE_PRIVATE — SecurityException unexpected, check LSPosed?", e)
         } catch (e: Exception) {
@@ -70,6 +74,9 @@ class ConfigBridge(private val context: Context) {
                 .putBoolean(KEY_GLOBAL_ENABLED, enabled)
                 .putLong(KEY_LAST_UPDATED, System.currentTimeMillis())
                 .commit()
+
+            // 确保SharedPreferences文件对Hook进程可读（XSharedPreferences需要）
+            ensurePrefsWorldReadable()
 
             Logger.App.d(TAG, "Set global_enabled = $enabled")
 
@@ -101,6 +108,9 @@ class ConfigBridge(private val context: Context) {
                 .putBoolean(KEY_CAPTURE_ENABLED, enabled)
                 .putLong(KEY_LAST_UPDATED, System.currentTimeMillis())
                 .commit()
+
+            // 确保文件对Hook进程可读
+            ensurePrefsWorldReadable()
 
             Logger.App.d(TAG, "Set capture_enabled = $enabled")
 
@@ -149,6 +159,25 @@ class ConfigBridge(private val context: Context) {
             Logger.App.w(TAG, "Cleared all configuration")
         } catch (e: Exception) {
             Logger.App.e(TAG, "Failed to clear config", e)
+        }
+    }
+
+    /**
+     * 确保SharedPreferences文件对其他进程可读（XSharedPreferences需要）
+     * Android 10+ 上 XSharedPreferences 无法跨进程读 MODE_PRIVATE 文件，
+     * 必须从模块自身进程设置文件权限
+     */
+    private fun ensurePrefsWorldReadable() {
+        try {
+            val prefsDir = File(context.applicationInfo.dataDir, "shared_prefs")
+            val prefsFile = File(prefsDir, "${PREF_NAME}.xml")
+            if (prefsFile.exists()) {
+                prefsFile.setReadable(true, false)
+                // 同时设置目录可读（某些ROM需要）
+                prefsDir.setReadable(true, false)
+            }
+        } catch (e: Exception) {
+            Logger.App.w(TAG, "Failed to make prefs world-readable: ${e.message}")
         }
     }
 }

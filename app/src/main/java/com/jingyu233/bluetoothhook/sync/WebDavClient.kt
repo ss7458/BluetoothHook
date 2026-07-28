@@ -39,13 +39,13 @@ class WebDavClient(
      */
     suspend fun testConnection(): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            OkHttpSardine().use { sardine ->
-                sardine.setCredentials(username, password)
+            val sardine = OkHttpSardine()
+            sardine.setCredentials(username, password)
 
-                // 尝试列出根目录
-                val resources = sardine.list(url)
+            // 尝试列出根目录
+            val resources = sardine.list(url)
 
-                Logger.App.i(TAG, "WebDAV connection test successful: ${resources.size} resources found")
+            Logger.App.i(TAG, "WebDAV connection test successful: ${resources.size} resources found")
             }
             Result.success(true)
 
@@ -60,26 +60,26 @@ class WebDavClient(
      */
     suspend fun uploadDevices(devices: List<VirtualDevice>): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            OkHttpSardine().use { sardine ->
-                sardine.setCredentials(username, password)
+            val sardine = OkHttpSardine()
+            sardine.setCredentials(username, password)
 
-                // 构建载荷
-                val payload = DevicesPayload(
-                    version = 1,
-                    exportedAt = System.currentTimeMillis(),
-                    deviceCount = devices.size,
-                    devices = devices
-                )
+            // 构建载荷
+            val payload = DevicesPayload(
+                version = 1,
+                exportedAt = System.currentTimeMillis(),
+                deviceCount = devices.size,
+                devices = devices
+            )
 
-                // 序列化为 JSON
-                val jsonString = json.encodeToString(payload)
-                val jsonBytes = jsonString.toByteArray(Charsets.UTF_8)
+            // 序列化为 JSON
+            val jsonString = json.encodeToString(payload)
+            val jsonBytes = jsonString.toByteArray(Charsets.UTF_8)
 
-                // 计算完整的文件 URL
-                val fileUrl = buildFileUrl(url, REMOTE_FILE_NAME)
+            // 计算完整的文件 URL
+            val fileUrl = buildFileUrl(url, REMOTE_FILE_NAME)
 
-                // 上传文件（Sardine put 方法签名：put(url, data, contentType)）
-                sardine.put(fileUrl, jsonBytes, "application/json")
+            // 上传文件（Sardine put 方法签名：put(url, data, contentType)）
+            sardine.put(fileUrl, jsonBytes, "application/json")
             }
 
             Logger.App.i(TAG, "Uploaded ${devices.size} devices to WebDAV")
@@ -99,21 +99,17 @@ class WebDavClient(
             val fileUrl = buildFileUrl(url, REMOTE_FILE_NAME)
 
             // 检查文件是否存在
-            if (!OkHttpSardine().use { sardine ->
-                    sardine.setCredentials(username, password)
-                    sardine.exists(fileUrl)
-                }) {
+            val sardine = OkHttpSardine()
+            sardine.setCredentials(username, password)
+            if (!sardine.exists(fileUrl)) {
                 Logger.App.w(TAG, "Remote file does not exist: $fileUrl")
                 return@withContext Result.success(emptyList())
             }
 
-            val payload = OkHttpSardine().use { sardine ->
-                sardine.setCredentials(username, password)
-                sardine.get(fileUrl).use { inputStream ->
+            val payload = sardine.get(fileUrl).use { inputStream ->
                     val jsonString = inputStream.readBytes().toString(Charsets.UTF_8)
                     json.decodeFromString<DevicesPayload>(jsonString)
                 }
-            }
 
             Logger.App.i(TAG, "Downloaded ${payload.devices.size} devices from WebDAV")
             Result.success(payload.devices)
@@ -131,21 +127,17 @@ class WebDavClient(
         try {
             val fileUrl = buildFileUrl(url, REMOTE_FILE_NAME)
 
-            if (!OkHttpSardine().use { sardine ->
-                    sardine.setCredentials(username, password)
-                    sardine.exists(fileUrl)
-                }) {
+            val sardine = OkHttpSardine()
+            sardine.setCredentials(username, password)
+            if (!sardine.exists(fileUrl)) {
                 return@withContext Result.success(0L)
             }
 
             // 下载并解析文件获取时间戳
-            val payload = OkHttpSardine().use { sardine ->
-                sardine.setCredentials(username, password)
-                sardine.get(fileUrl).use { inputStream ->
+            val payload = sardine.get(fileUrl).use { inputStream ->
                     val jsonString = inputStream.readBytes().toString(Charsets.UTF_8)
                     json.decodeFromString<DevicesPayload>(jsonString)
                 }
-            }
 
             Result.success(payload.exportedAt)
 

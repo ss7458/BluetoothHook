@@ -33,7 +33,7 @@ object BleScanManager {
 
         override fun onScanFailed(errorCode: Int) {
             Logger.Hook.e(TAG, "BLE scan failed with error code: $errorCode")
-            _isScanning = false
+            isScanning = false
         }
     }
 

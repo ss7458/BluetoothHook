@@ -55,4 +55,25 @@ class DeviceListViewModel(application: Application) : AndroidViewModel(applicati
         Logger.App.i(TAG, "Global enabled set to: $enabled")
     }
 
+    fun toggleDevice(device: VirtualDevice) {
+        viewModelScope.launch {
+            repository.toggleDevice(device)
+            Logger.App.d(TAG, "Toggled device: ${device.name}")
+        }
+    }
 
+    fun deleteDevice(device: VirtualDevice) {
+        viewModelScope.launch {
+            repository.deleteDevice(device)
+            Logger.App.i(TAG, "Deleted device: ${device.name}")
+        }
+    }
+
+    fun refreshHookStatus() {
+        _hookStatus.value = HookStatusHelper.resolve(
+            CaptureBridge.hookStatus.value,
+            HookStatusHelper.isModuleActive(getApplication())
+        )
+        Logger.App.d(TAG, "Refreshed hook status: ${_hookStatus.value.summary}")
+    }
+}

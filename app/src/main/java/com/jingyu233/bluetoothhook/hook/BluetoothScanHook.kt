@@ -382,8 +382,10 @@ class BluetoothScanHook(
                 val text = fallbackFile.readText()
                 val json = Json { ignoreUnknownKeys = true }
                 val obj = json.decodeFromString<Map<String, JsonElement>>(text)
-                val fileGlobal = obj["global_enabled"]?.toString()?.toBooleanOrNull()
-                val fileCapture = obj["capture_enabled"]?.toString()?.toBooleanOrNull()
+                val fileGlobalStr = obj["global_enabled"]?.toString()
+                val fileCaptureStr = obj["capture_enabled"]?.toString()
+                val fileGlobal = if (fileGlobalStr == "true") true else if (fileGlobalStr == "false") false else null
+                val fileCapture = if (fileCaptureStr == "true") true else if (fileCaptureStr == "false") false else null
                 if (fileGlobal != null || fileCapture != null) {
                     if (fileGlobal != null) cachedGlobalEnabled = fileGlobal
                     if (fileCapture != null) cachedCaptureEnabled = fileCapture

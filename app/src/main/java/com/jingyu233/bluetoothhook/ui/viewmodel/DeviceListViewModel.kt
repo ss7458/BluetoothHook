@@ -3,7 +3,6 @@ package com.jingyu233.bluetoothhook.ui.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.jingyu233.bluetoothhook.ble.BleScanManager
 import com.jingyu233.bluetoothhook.data.bridge.CaptureBridge
 import com.jingyu233.bluetoothhook.data.bridge.ConfigBridge
 import com.jingyu233.bluetoothhook.data.bridge.HookStatusHelper
@@ -36,9 +35,6 @@ class DeviceListViewModel(application: Application) : AndroidViewModel(applicati
     )
     val hookStatus: StateFlow<HookStatusHelper.Status> = _hookStatus.asStateFlow()
 
-    private val _bleScanning = MutableStateFlow(BleScanManager.isScanning)
-    val bleScanning: StateFlow<Boolean> = _bleScanning.asStateFlow()
-
     init {
         _globalEnabled.value = configBridge.getGlobalEnabled()
         refreshHookStatus()
@@ -59,12 +55,4 @@ class DeviceListViewModel(application: Application) : AndroidViewModel(applicati
         Logger.App.i(TAG, "Global enabled set to: $enabled")
     }
 
-    /**
-     * 切换BLE扫描（调用方已确保权限已授予）
-     */
-    fun toggleBleScan() {
-        val app = getApplication<Application>()
-        val result = BleScanManager.toggle(app)
-        _bleScanning.value = result
-        Logger.App.i(TAG, "BLE scan toggled: $result")
-    }
+

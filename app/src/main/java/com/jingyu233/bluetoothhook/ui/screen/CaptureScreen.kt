@@ -1,6 +1,9 @@
 package com.jingyu233.bluetoothhook.ui.screen
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.RepeatMode
@@ -27,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,7 +54,23 @@ fun CaptureScreen(
     val hookStatus by viewModel.hookStatus.collectAsState()
     val isListening by viewModel.isListening.collectAsState()
     val captureEnabled by viewModel.captureEnabled.collectAsState()
+    val bleScanning by viewModel.bleScanning.collectAsState()
     val context = LocalContext.current
+
+    // BLE 扫描权限
+    val blePermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+    } else {
+        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+    val blePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val allGranted = permissions.values.all { it }
+        if (allGranted) {
+            viewModel.startBleScan()
+        }
+    }
 
     // SAF 导出启动器
     val exportLauncher = rememberLauncherForActivityResult(
@@ -127,6 +147,60 @@ fun CaptureScreen(
                 onRefresh = { viewModel.refreshHookStatus() },
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
+
+            // BLE 扫描控制
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.BluetoothSearching,
+                        contentDescription = null,
+                        tint = if (bleScanning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "App 内扫描",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = if (bleScanning)
+                                "BLE 扫描运行中"
+                            else
+                                "开启后触发Hook注入",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = bleScanning,
+                        onCheckedChange = {
+                            if (bleScanning) {
+                                viewModel.stopBleScan()
+                            } else {
+                                val hasPermission = blePermissions.all { perm ->
+                                    ContextCompat.checkSelfPermission(context, perm) == PackageManager.PERMISSION_GRANTED
+                                }
+                                if (hasPermission) {
+                                    viewModel.startBleScan()
+                                } else {
+                                    blePermissionLauncher.launch(blePermissions)
+                                }
+                            }
+                        }
+                    )
+                }
+            }
 
             // 控制行
             Card(

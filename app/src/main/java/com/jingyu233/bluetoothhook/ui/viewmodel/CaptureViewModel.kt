@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.jingyu233.bluetoothhook.ble.BleScanManager
 import com.jingyu233.bluetoothhook.data.bridge.CaptureBridge
 import com.jingyu233.bluetoothhook.data.bridge.HookStatusHelper
 import com.jingyu233.bluetoothhook.data.local.SettingsDataStore
@@ -45,6 +46,10 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     // 服务端错误信息
     val serverError: StateFlow<String?> = CaptureBridge.serverError
 
+    // BLE 扫描状态
+    private val _bleScanning = MutableStateFlow(BleScanManager.isScanning)
+    val bleScanning: StateFlow<Boolean> = _bleScanning.asStateFlow()
+
     init {
         viewModelScope.launch {
             CaptureBridge.hookStatus.collect {
@@ -59,6 +64,19 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             settingsDataStore.toggleCaptureEnabled(enabled)
         }
+    }
+
+    fun toggleBleScan() {
+        _bleScanning.value = BleScanManager.toggle(getApplication())
+    }
+
+    fun startBleScan() {
+        _bleScanning.value = BleScanManager.startScan(getApplication())
+    }
+
+    fun stopBleScan() {
+        BleScanManager.stopScan()
+        _bleScanning.value = false
     }
 
     fun refreshHookStatus() {

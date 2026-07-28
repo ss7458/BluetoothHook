@@ -46,7 +46,6 @@ class WebDavClient(
             val resources = sardine.list(url)
 
             Logger.App.i(TAG, "WebDAV connection test successful: ${resources.size} resources found")
-            }
             Result.success(true)
 
         } catch (e: Exception) {
@@ -80,7 +79,6 @@ class WebDavClient(
 
             // 上传文件（Sardine put 方法签名：put(url, data, contentType)）
             sardine.put(fileUrl, jsonBytes, "application/json")
-            }
 
             Logger.App.i(TAG, "Uploaded ${devices.size} devices to WebDAV")
             Result.success(Unit)

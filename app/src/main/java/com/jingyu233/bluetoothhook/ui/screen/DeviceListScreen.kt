@@ -214,7 +214,7 @@ fun DeviceListItem(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = device.macAddress,
+                    text = device.mac,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

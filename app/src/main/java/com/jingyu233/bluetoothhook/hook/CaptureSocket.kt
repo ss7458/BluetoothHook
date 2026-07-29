@@ -1,6 +1,7 @@
 package com.jingyu233.bluetoothhook.hook
 
 import com.jingyu233.bluetoothhook.CaptureProtocol
+import com.jingyu233.bluetoothhook.utils.Logger
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStream
@@ -28,6 +29,7 @@ data class SyncedConfig(
  */
 object CaptureSocket {
 
+    private const val TAG = "BTHook:Hook:Socket"
     private const val HOST = "127.0.0.1"
 
     @Volatile
@@ -54,55 +56,62 @@ object CaptureSocket {
      * Thread-safe via @Synchronized.
      * Never throws – best-effort only.
      */
-    @Synchronized
     fun sendLine(line: String) {
-        try {
-            var s = socket
-            var os = outputStream
+        synchronized(this) {
+            try {
+                var s = socket
+                var os = outputStream
 
-            // (Re)connect if needed
-            if (s == null || s.isClosed || !s.isConnected) {
-                // Backoff: skip reconnect if last failure was < 1s ago
-                val now = System.currentTimeMillis()
-                if (lastConnectFailMs != 0L && now - lastConnectFailMs < 1000) {
-                    return
+                // (Re)connect if needed
+                if (s == null || s.isClosed || !s.isConnected) {
+                    // Backoff: skip reconnect if last failure was < 1s ago
+                    val now = System.currentTimeMillis()
+                    if (lastConnectFailMs != 0L && now - lastConnectFailMs < 1000) {
+                        return
+                    }
+
+                    Logger.Hook.d(TAG, "Attempting TCP connect to $HOST:${CaptureProtocol.PORT} ...")
+                    s = Socket(HOST, CaptureProtocol.PORT)
+                    s.soTimeout = 5000 // 5s read timeout for config lines
+                    os = s.getOutputStream()
+                    Logger.Hook.i(TAG, "TCP connected to $HOST:${CaptureProtocol.PORT}")
+
+                    // AUTH handshake immediately after connect
+                    val authBytes = "${CaptureProtocol.AUTH_PREFIX}${CaptureProtocol.AUTH_TOKEN}\n"
+                        .toByteArray(Charsets.UTF_8)
+                    os?.write(authBytes)
+                    os?.flush()
+                    Logger.Hook.d(TAG, "AUTH sent to server")
+
+                    // Read config lines pushed by the App
+                    val reader = BufferedReader(
+                        InputStreamReader(s.getInputStream(), Charsets.UTF_8)
+                    )
+                    readConfigFromServer(reader)
+
+                    Logger.Hook.i(TAG, "AUTH+config sync complete, configCache updated: globalEnabled=${configCache.globalEnabled}, captureEnabled=${configCache.captureEnabled}, devices=${if (configCache.devicesJson == "[]") "none" else "present"}, timestamp=${configCache.timestamp}")
+
+                    socket = s
+                    outputStream = os
+                    lastConnectFailMs = 0L
                 }
 
-                s = Socket(HOST, CaptureProtocol.PORT)
-                s.soTimeout = 5000 // 5s read timeout for config lines
-                os = s.getOutputStream()
-
-                // AUTH handshake immediately after connect
-                val authBytes = "${CaptureProtocol.AUTH_PREFIX}${CaptureProtocol.AUTH_TOKEN}\n"
-                    .toByteArray(Charsets.UTF_8)
-                os?.write(authBytes)
+                val data = (line + "\n").toByteArray(Charsets.UTF_8)
+                os?.write(data)
                 os?.flush()
-
-                // ── 读取 App 推送的配置行 ──
-                val reader = BufferedReader(
-                    InputStreamReader(s.getInputStream(), Charsets.UTF_8)
-                )
-                readConfigFromServer(reader)
-
-                socket = s
-                outputStream = os
-                lastConnectFailMs = 0L
+            } catch (e: Throwable) {
+                Logger.Hook.w(TAG, "sendLine failed: ${e.javaClass.simpleName}: ${e.message}")
+                // Any failure --> record timestamp, tear down so next call reconnects
+                lastConnectFailMs = System.currentTimeMillis()
+                try {
+                    outputStream?.close()
+                } catch (_: Throwable) {}
+                try {
+                    socket?.close()
+                } catch (_: Throwable) {}
+                socket = null
+                outputStream = null
             }
-
-            val data = (line + "\n").toByteArray(Charsets.UTF_8)
-            os?.write(data)
-            os?.flush()
-        } catch (e: Throwable) {
-            // Any failure → record timestamp, tear down so next call reconnects
-            lastConnectFailMs = System.currentTimeMillis()
-            try {
-                outputStream?.close()
-            } catch (_: Throwable) { }
-            try {
-                socket?.close()
-            } catch (_: Throwable) { }
-            socket = null
-            outputStream = null
         }
     }
 
@@ -117,21 +126,31 @@ object CaptureSocket {
             var captureEnabled = configCache.captureEnabled
             var devicesJson = configCache.devicesJson
             var timestamp = configCache.timestamp
+            var configLineCount = 0
 
             while (reader.readLine().also { line = it } != null) {
                 val l = line ?: break
-                if (l == "CFG|END") break
+                if (l == "CFG|END") { configLineCount++; break }
                 if (!l.startsWith("CFG|")) continue
 
                 val parts = l.split("|", limit = 3)
                 if (parts.size < 3) continue
+                configLineCount++
 
                 when (parts[1]) {
-                    "global_enabled" -> globalEnabled = parts[2].toBoolean()
-                    "capture_enabled" -> captureEnabled = parts[2].toBoolean()
+                    "global_enabled" -> {
+                        globalEnabled = parts[2].toBoolean()
+                        Logger.Hook.d(TAG, "Config: global_enabled=$globalEnabled")
+                    }
+                    "capture_enabled" -> {
+                        captureEnabled = parts[2].toBoolean()
+                        Logger.Hook.d(TAG, "Config: capture_enabled=$captureEnabled")
+                    }
                     "devices" -> {
                         devicesJson = parts[2]
                         timestamp = System.currentTimeMillis()
+                        val devCount = parts[2].count { it == '{' }
+                        Logger.Hook.d(TAG, "Config: devices ($devCount device(s))")
                     }
                 }
             }
@@ -142,7 +161,9 @@ object CaptureSocket {
                 devicesJson = devicesJson,
                 timestamp = timestamp
             )
-        } catch (_: Exception) {
+            Logger.Hook.d(TAG, "readConfigFromServer finished, $configLineCount line(s) read")
+        } catch (e: Exception) {
+            Logger.Hook.w(TAG, "readConfigFromServer error: ${e.message}")
             // 读取配置失败时保留旧缓存
         }
     }

@@ -33,21 +33,27 @@ class HookEntry : IXposedHookLoadPackage {
         }
 
         try {
-            Logger.Hook.i(TAG, "Initializing BluetoothHook in ${lpparam.packageName}")
+            Logger.Hook.i(TAG, "=== BluetoothHook init START (pid=${android.os.Process.myPid()}, pkg=${lpparam.packageName}) ===")
 
             // 初始化SharedPreferences以读取模块配置
             // 使用XSharedPreferences可以跨进程读取（系统进程读取模块进程的配置）
+            Logger.Hook.d(TAG, "Creating XSharedPreferences(pkg=$PREF_PACKAGE, name=$PREF_NAME)")
             val prefs = XSharedPreferences(PREF_PACKAGE, PREF_NAME)
 
             // 设置文件权限为world-readable（在模块进程中设置，这里只是尝试）
             try {
                 prefs.makeWorldReadable()
+                Logger.Hook.d(TAG, "XSharedPreferences.makeWorldReadable() succeeded")
             } catch (e: Exception) {
-                Logger.Hook.w(TAG, "Failed to make preferences world-readable: ${e.message}")
+                Logger.Hook.w(TAG, "XSharedPreferences.makeWorldReadable() failed: ${e.message}")
             }
 
             // 始终初始化 Hook：虚拟注入由 global_enabled 控制，抓包由 capture_enabled 控制
             prefs.reload()
+            val gEnabled = prefs.getBoolean("global_enabled", true)
+            val cEnabled = prefs.getBoolean("capture_enabled", false)
+            val devJson  = prefs.getString("devices", "[]") ?: "[]"
+            Logger.Hook.i(TAG, "XSharedPreferences loaded: global=$gEnabled, capture=$cEnabled, devices=${if (devJson == "[]") "empty" else "present"}, deviceJsonLen=${devJson.length}")
 
             // 初始化蓝牙扫描Hook
             val bluetoothScanHook = BluetoothScanHook(lpparam.classLoader, prefs)
@@ -56,7 +62,7 @@ class HookEntry : IXposedHookLoadPackage {
             // 写入Hook状态标记（供UI进程读取）
             writeHookStatus()
 
-            Logger.Hook.i(TAG, "BluetoothHook initialized successfully")
+            Logger.Hook.i(TAG, "=== BluetoothHook init END ===")
 
         } catch (e: Throwable) {
             // 捕获所有异常，防止蓝牙服务崩溃
@@ -77,7 +83,12 @@ class HookEntry : IXposedHookLoadPackage {
                 object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         try {
-                            val context = param.thisObject as android.content.Context
+                            val app = param.thisObject
+                            if (app !is android.content.Context) {
+                                Logger.Hook.w(TAG, "thisObject is not a Context: ${app?.javaClass?.name}")
+                                return
+                            }
+                            val context = app as android.content.Context
                             val prefs = context.getSharedPreferences(
                                 "module_status",
                                 android.content.Context.MODE_PRIVATE

@@ -208,9 +208,18 @@ class BluetoothScanHook(
         scanResultCallCount++
         cachedScanInstance = param.thisObject
 
-        // 每 100 次记录一次统计日志
-        if (scanResultCallCount % 100 == 1) {
-            Logger.Hook.i(TAG, "handleScanResult called #$scanResultCallCount, args=${args.size}, class=${param.thisObject?.javaClass?.name}")
+        // 前 5 次 + 每 100 次记录详细日志
+        if (scanResultCallCount <= 5 || scanResultCallCount % 100 == 1) {
+            val argTypes = args.map { it?.javaClass?.simpleName ?: "null" }.joinToString(", ")
+            val argValues = args.mapIndexed { idx, arg ->
+                when (arg) {
+                    null -> "null"
+                    is ByteArray -> "byte[${arg.size}]"
+                    is String -> if (arg.length > 17) "\"${arg.take(17)}...\"" else "\"$arg\""
+                    else -> arg.toString()
+                }
+            }.joinToString(", ")
+            Logger.Hook.i(TAG, "handleScanResult #$scanResultCallCount: ${args.size} args, types=[$argTypes], values=[$argValues]")
         }
 
         // ---- 1. 按类型提取参数 ----

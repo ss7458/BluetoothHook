@@ -12,6 +12,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -60,6 +61,7 @@ fun CaptureScreen(
     val rssiMin by viewModel.rssiMinFilter.collectAsState()
     val rssiMax by viewModel.rssiMaxFilter.collectAsState()
     val macPattern by viewModel.macFilterPattern.collectAsState()
+    val hasActiveFilter by viewModel.hasActiveFilter.collectAsState()
     var showFilter by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
@@ -222,7 +224,7 @@ fun CaptureScreen(
                         Icon(
                             if (showFilter) Icons.Default.FilterListOff else Icons.Default.FilterList,
                             contentDescription = "过滤",
-                            tint = if (viewModel.hasActiveFilter()) MaterialTheme.colorScheme.primary
+                            tint = if (hasActiveFilter) MaterialTheme.colorScheme.primary
                                    else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(20.dp)
                         )

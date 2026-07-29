@@ -24,6 +24,7 @@ class ConfigBridge(private val context: Context) {
         private const val KEY_DEVICES = "devices"
         private const val KEY_GLOBAL_ENABLED = "global_enabled"
         const val KEY_CAPTURE_ENABLED = "capture_enabled"
+        private const val KEY_CLASSIC_INTERVAL_MS = "classic_interval_ms"
         private const val KEY_LAST_UPDATED = "last_updated"
     }
 
@@ -137,6 +138,36 @@ class ConfigBridge(private val context: Context) {
     }
 
     /**
+     * 设置经典蓝牙发现广播间隔(毫秒)
+     */
+    fun setClassicIntervalMs(ms: Int) {
+        try {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.edit()
+                .putInt(KEY_CLASSIC_INTERVAL_MS, ms)
+                .commit()
+            ensurePrefsWorldReadable()
+            writeFallbackConfigFile()
+            Logger.App.d(TAG, "Set classic_interval = ${ms}ms")
+        } catch (e: Exception) {
+            Logger.App.e(TAG, "Failed to set classic interval", e)
+        }
+    }
+
+    /**
+     * 获取经典蓝牙发现广播间隔(毫秒)，默认 5000
+     */
+    fun getClassicIntervalMs(): Int {
+        return try {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.getInt(KEY_CLASSIC_INTERVAL_MS, 5000)
+        } catch (e: Exception) {
+            Logger.App.e(TAG, "Failed to get classic interval", e)
+            5000
+        }
+    }
+
+    /**
      * 获取配置最后更新时间
      */
     fun getLastUpdatedTime(): Long {
@@ -216,7 +247,8 @@ class ConfigBridge(private val context: Context) {
             val globalEnabled = prefs.getBoolean(KEY_GLOBAL_ENABLED, true)
             val captureEnabled = prefs.getBoolean(KEY_CAPTURE_ENABLED, false)
 
-            val configJson = """{"global_enabled":$globalEnabled,"capture_enabled":$captureEnabled,"devices":$devicesJson}"""
+            val classicInterval = prefs.getInt(KEY_CLASSIC_INTERVAL_MS, 5000)
+            val configJson = """{"global_enabled":$globalEnabled,"capture_enabled":$captureEnabled,"classic_interval_ms":$classicInterval,"devices":$devicesJson}"""
             val fallbackFile = File(fallbackDir, "bthook_config.json")
             fallbackFile.writeText(configJson, Charsets.UTF_8)
             fallbackFile.setReadable(true, false)

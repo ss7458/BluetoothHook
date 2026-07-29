@@ -14,7 +14,8 @@ data class AppSettings(
     val webdavPassword: String = "",
     val autoSyncEnabled: Boolean = false,
     val syncIntervalSeconds: Int = 60,  // 同步间隔(秒)
-    val logLevel: LogLevel = LogLevel.INFO
+    val logLevel: LogLevel = LogLevel.INFO,
+    val classicIntervalMs: Int = 5000  // 经典蓝牙发现广播间隔(毫秒)
 )
 
 /**

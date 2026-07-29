@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -87,6 +88,16 @@ fun SettingsScreen(
                         onTestConnection = { viewModel.testWebDavConnection() },
                         onSyncNow = { viewModel.syncNow() },
                         onClearTestResult = { viewModel.clearConnectionTestResult() }
+                    )
+                }
+            }
+
+            // 经典蓝牙发现广播间隔
+            item {
+                SettingsSection(title = "经典蓝牙发现广播") {
+                    ClassicIntervalCard(
+                        intervalMs = settings.classicIntervalMs,
+                        onIntervalChange = { viewModel.updateClassicInterval(it) }
                     )
                 }
             }
@@ -361,10 +372,90 @@ fun WebDavSettingsCard(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                            }
-                        }
-                    }
-                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ClassicIntervalCard(
+    intervalMs: Int,
+    onIntervalChange: (Int) -> Unit
+) {
+    val sliderValue = remember(intervalMs) { mutableFloatStateOf(intervalMs / 1000f) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "向系统蓝牙设置推送虚拟设备的频率",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${sliderValue.value.toInt()} 秒",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.width(64.dp)
+                )
+
+                Slider(
+                    value = sliderValue.value,
+                    onValueChange = { sliderValue.value = it },
+                    onValueChangeFinished = {
+                        onIntervalChange(sliderValue.value.toInt() * 1000)
+                    },
+                    valueRange = 1f..30f,
+                    steps = 28,
+                    modifier = Modifier.weight(1f)
+                )
+
+                Text(
+                    text = "${sliderValue.value.toInt()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.width(24.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "1秒",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "默认 5 秒",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "30秒",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "设为 0 可关闭经典蓝牙发现广播。该广播使虚拟设备出现在系统蓝牙设置中。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
             }
         }
     }

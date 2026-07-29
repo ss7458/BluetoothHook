@@ -266,6 +266,10 @@ object CaptureBridge {
             val devicesJson = configBridge.getDevicesJson()
             os.write("CFG|devices|$devicesJson\n".toByteArray(Charsets.UTF_8))
 
+            // classic_interval
+            val classicIntervalMs = configBridge.getClassicIntervalMs()
+            os.write("CFG|classic_interval|$classicIntervalMs\n".toByteArray(Charsets.UTF_8))
+
             // 终止标记
             os.write("CFG|END\n".toByteArray(Charsets.UTF_8))
             os.flush()

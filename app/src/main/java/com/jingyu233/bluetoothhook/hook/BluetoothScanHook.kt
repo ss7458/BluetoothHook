@@ -1,8 +1,8 @@
 package com.jingyu233.bluetoothhook.hook
 
-import android.app.ActivityThread
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
+import android.content.Context
 import android.content.Intent
 import com.jingyu233.bluetoothhook.data.model.VirtualDevice
 import com.jingyu233.bluetoothhook.utils.Logger
@@ -339,6 +339,7 @@ class BluetoothScanHook(
         Thread({
             Logger.Hook.i(TAG, "Periodic injection thread started")
             var tickCount = 0
+            var lastClassicBroadcastMs = 0L
             while (periodicInjectorRunning) {
                 try {
                     Thread.sleep(500L)
@@ -346,15 +347,19 @@ class BluetoothScanHook(
                     reloadPrefsIfNeeded(force = true)
                     val instance = cachedScanInstance
                     if (instance == null) {
-                        if (tickCount % 20 == 0) { // 每 10 秒
+                        if (tickCount % 20 == 0) {
                             Logger.Hook.d(TAG, "Periodic tick #$tickCount: cachedScanInstance is null, waiting for scan session")
                         }
                         continue
                     }
                     if (cachedGlobalEnabled) {
                         injectVirtualDevicesAdaptive(instance)
-                        // 每 10 个 tick (~5秒) 发一次 classic BT 发现广播
-                        if (tickCount % 10 == 0) {
+                        // 经典蓝牙发现广播：动态间隔（从 configCache 读取，1-30秒范围）
+                        val classicIntervalMs = (CaptureSocket.configCache.classicIntervalMs
+                            .coerceIn(1000, 30000))
+                        val now = System.currentTimeMillis()
+                        if (now - lastClassicBroadcastMs >= classicIntervalMs) {
+                            lastClassicBroadcastMs = now
                             injectClassicDiscoveryBroadcast()
                         }
                     } else {
@@ -620,8 +625,16 @@ class BluetoothScanHook(
             val enabledDevices = devices.filter { it.enabled }
             if (enabledDevices.isEmpty()) return
 
-            // 获取系统 Context
-            val context = ActivityThread.currentApplication() ?: return
+            // 通过反射获取系统 Context（ActivityThread 是隐藏 API）
+            val context = try {
+                val atClass = Class.forName("android.app.ActivityThread")
+                val method = atClass.getMethod("currentApplication")
+                method.invoke(null) as? android.content.Context
+            } catch (_: Throwable) { null }
+            if (context == null) {
+                Logger.Hook.d(TAG, "Classic BT: cannot get system context")
+                return
+            }
 
             for (device in enabledDevices) {
                 try {

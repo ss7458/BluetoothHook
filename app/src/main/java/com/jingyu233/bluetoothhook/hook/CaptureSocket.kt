@@ -16,6 +16,7 @@ data class SyncedConfig(
     val globalEnabled: Boolean = true,
     val captureEnabled: Boolean = false,
     val devicesJson: String = "[]",
+    val classicIntervalMs: Int = 5000,
     val timestamp: Long = 0L
 )
 
@@ -138,6 +139,7 @@ object CaptureSocket {
             var globalEnabled = configCache.globalEnabled
             var captureEnabled = configCache.captureEnabled
             var devicesJson = configCache.devicesJson
+            var classicIntervalMs = configCache.classicIntervalMs
             var timestamp = configCache.timestamp
             var configLineCount = 0
 
@@ -164,6 +166,10 @@ object CaptureSocket {
                         timestamp = System.currentTimeMillis()
                         val devCount = parts[2].count { it == '{' }
                         Logger.Hook.d(TAG, "Config: devices ($devCount device(s))")
+                    }
+                    "classic_interval" -> {
+                        classicIntervalMs = parts[2].toIntOrNull() ?: 5000
+                        Logger.Hook.d(TAG, "Config: classic_interval=${classicIntervalMs}ms")
                     }
                 }
             }

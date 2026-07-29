@@ -33,6 +33,7 @@ class SettingsDataStore(private val context: Context) {
         private val KEY_AUTO_SYNC_ENABLED = booleanPreferencesKey("auto_sync_enabled")
         private val KEY_SYNC_INTERVAL_SECONDS = intPreferencesKey("sync_interval_seconds")
         private val KEY_CAPTURE_ENABLED = booleanPreferencesKey("capture_enabled")
+        private val KEY_CLASSIC_INTERVAL_MS = intPreferencesKey("classic_interval_ms")
     }
 
     /**
@@ -56,7 +57,8 @@ class SettingsDataStore(private val context: Context) {
                 webdavUsername = preferences[KEY_WEBDAV_USERNAME] ?: "",
                 webdavPassword = preferences[KEY_WEBDAV_PASSWORD] ?: "",
                 autoSyncEnabled = preferences[KEY_AUTO_SYNC_ENABLED] ?: false,
-                syncIntervalSeconds = preferences[KEY_SYNC_INTERVAL_SECONDS] ?: 60
+                syncIntervalSeconds = preferences[KEY_SYNC_INTERVAL_SECONDS] ?: 60,
+                classicIntervalMs = preferences[KEY_CLASSIC_INTERVAL_MS] ?: 5000
             )
         }
 
@@ -127,6 +129,20 @@ class SettingsDataStore(private val context: Context) {
             Logger.App.d(TAG, "Updated capture enabled: $enabled")
         } catch (e: IOException) {
             Logger.App.e(TAG, "Failed to update capture enabled", e)
+        }
+    }
+
+    /**
+     * 更新经典蓝牙发现广播间隔(毫秒)
+     */
+    suspend fun updateClassicInterval(ms: Int) {
+        try {
+            context.dataStore.edit { preferences ->
+                preferences[KEY_CLASSIC_INTERVAL_MS] = ms
+            }
+            Logger.App.d(TAG, "Updated classic interval: $ms ms")
+        } catch (e: IOException) {
+            Logger.App.e(TAG, "Failed to update classic interval", e)
         }
     }
 

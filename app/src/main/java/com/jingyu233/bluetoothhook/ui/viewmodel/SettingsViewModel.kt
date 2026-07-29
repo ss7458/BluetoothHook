@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.jingyu233.bluetoothhook.data.bridge.CaptureBridge
+import com.jingyu233.bluetoothhook.data.bridge.ConfigBridge
 import com.jingyu233.bluetoothhook.data.bridge.HookStatusHelper
 import com.jingyu233.bluetoothhook.data.local.SettingsDataStore
 import com.jingyu233.bluetoothhook.data.local.VirtualDeviceDatabase
@@ -120,6 +121,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             } catch (e: Exception) {
                 Logger.App.e(TAG, "Failed to refresh device count", e)
             }
+        }
+    }
+
+    fun updateClassicInterval(ms: Int) {
+        _settings.value = _settings.value.copy(classicIntervalMs = ms)
+        viewModelScope.launch {
+            settingsDataStore.updateClassicInterval(ms)
+            // 同步到 ConfigBridge 以便 TCP CFG 传到 hook 进程
+            ConfigBridge(getApplication()).setClassicIntervalMs(ms)
         }
     }
 

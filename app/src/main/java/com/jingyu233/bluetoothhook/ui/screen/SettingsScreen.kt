@@ -372,13 +372,17 @@ fun WebDavSettingsCard(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ClassicIntervalCard(
+fun ClassicIntervalCard(
     intervalMs: Int,
     onIntervalChange: (Int) -> Unit
 ) {
@@ -453,10 +457,6 @@ private fun ClassicIntervalCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        }
-    }
-}
-            }
         }
     }
 }

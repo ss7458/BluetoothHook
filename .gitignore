@@ -14,3 +14,10 @@ local.properties
 
 # Deepwork state files
 .slim/deepwork/
+
+# Local helper scripts (not for repo)
+PUSH_GUIDE.md
+askpass.cmd
+
+# Bluetooth APK dumps
+蓝芽app/

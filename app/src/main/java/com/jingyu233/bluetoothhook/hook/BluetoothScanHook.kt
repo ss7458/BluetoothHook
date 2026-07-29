@@ -383,10 +383,11 @@ class BluetoothScanHook(
             prefs.reload()
             val prefsCapture = prefs.getBoolean("capture_enabled", cachedCaptureEnabled)
             val prefsGlobal = prefs.getBoolean("global_enabled", cachedGlobalEnabled)
-            if (prefsCapture != false || prefsGlobal != true) {
+            if (prefsCapture != cachedCaptureEnabled || prefsGlobal != cachedGlobalEnabled) {
                 cachedCaptureEnabled = prefsCapture
                 cachedGlobalEnabled = prefsGlobal
                 prefsSource = "xsp"
+                Logger.Hook.d(TAG, "Config updated from XSP: global=$cachedGlobalEnabled, capture=$cachedCaptureEnabled")
             }
         } catch (e: Throwable) { }
 

@@ -71,7 +71,7 @@ class ScanResultBuilder(private val classLoader: ClassLoader) {
             val txPower = if (isSdk34Plus) 127 else 0
 
             try {
-                XposedHelpers.newInstance(
+                val result = XposedHelpers.newInstance(
                     scanResultClass,
                     device,
                     eventType,
@@ -84,14 +84,19 @@ class ScanResultBuilder(private val classLoader: ClassLoader) {
                     scanRecord,
                     timestampNanos
                 )
+                Logger.Hook.d(TAG, "Built ScanResult via 10-param constructor: $macAddress rssi=$rssi")
+                return result
             } catch (e: Exception) {
-                XposedHelpers.newInstance(
+                Logger.Hook.d(TAG, "10-param constructor failed (${e.message}), trying 4-param...")
+                val result = XposedHelpers.newInstance(
                     scanResultClass,
                     device,
                     scanRecord,
                     rssi,
                     timestampNanos
                 )
+                Logger.Hook.d(TAG, "Built ScanResult via 4-param constructor: $macAddress rssi=$rssi")
+                return result
             }
 
         } catch (e: Throwable) {

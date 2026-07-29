@@ -6,6 +6,7 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStream
 import java.net.Socket
+import java.util.concurrent.Executors
 
 /**
  * 从 App 进程同步过来的配置快照
@@ -26,11 +27,18 @@ data class SyncedConfig(
  *
  * 在 AUTH 握手后读取 App 推送的配置行（CFG|key|value），
  * 缓存到 [configCache] 供 BluetoothScanHook / VirtualDeviceInjector 使用。
+ *
+ * 所有 TCP I/O 在独立后台线程执行，避免 Android 15+ 的 NetworkOnMainThreadException。
  */
 object CaptureSocket {
 
     private const val TAG = "BTHook:Hook:Socket"
     private const val HOST = "127.0.0.1"
+
+    // 单线程后台执行器，用于所有 socket I/O（避免主线程网络操作）
+    private val executor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "BTHook-Socket").apply { isDaemon = true }
+    }
 
     @Volatile
     private var socket: Socket? = null
@@ -51,67 +59,72 @@ object CaptureSocket {
 
     /**
      * Send a single line (UTF-8, LF-terminated) to the App UI.
+     * 在后台线程异步执行，避免主线程 NetworkOnMainThreadException。
      * Reconnects lazily if the socket is closed or was never opened.
      * On first connect, reads config lines from server after AUTH handshake.
-     * Thread-safe via @Synchronized.
-     * Never throws – best-effort only.
+     * Non-blocking, thread-safe. Never throws – best-effort only.
      */
     fun sendLine(line: String) {
-        synchronized(this) {
-            try {
-                var s = socket
-                var os = outputStream
+        executor.submit { sendLineSync(line) }
+    }
 
-                // (Re)connect if needed
-                if (s == null || s.isClosed || !s.isConnected) {
-                    // Backoff: skip reconnect if last failure was < 1s ago
-                    val now = System.currentTimeMillis()
-                    if (lastConnectFailMs != 0L && now - lastConnectFailMs < 1000) {
-                        return
-                    }
+    /**
+     * 实际的发送逻辑，在 executor 后台线程上执行。
+     */
+    private fun sendLineSync(line: String) {
+        try {
+            var s = socket
+            var os = outputStream
 
-                    Logger.Hook.d(TAG, "Attempting TCP connect to $HOST:${CaptureProtocol.PORT} ...")
-                    s = Socket(HOST, CaptureProtocol.PORT)
-                    s.soTimeout = 5000 // 5s read timeout for config lines
-                    os = s.getOutputStream()
-                    Logger.Hook.i(TAG, "TCP connected to $HOST:${CaptureProtocol.PORT}")
-
-                    // AUTH handshake immediately after connect
-                    val authBytes = "${CaptureProtocol.AUTH_PREFIX}${CaptureProtocol.AUTH_TOKEN}\n"
-                        .toByteArray(Charsets.UTF_8)
-                    os?.write(authBytes)
-                    os?.flush()
-                    Logger.Hook.d(TAG, "AUTH sent to server")
-
-                    // Read config lines pushed by the App
-                    val reader = BufferedReader(
-                        InputStreamReader(s.getInputStream(), Charsets.UTF_8)
-                    )
-                    readConfigFromServer(reader)
-
-                    Logger.Hook.i(TAG, "AUTH+config sync complete, configCache updated: globalEnabled=${configCache.globalEnabled}, captureEnabled=${configCache.captureEnabled}, devices=${if (configCache.devicesJson == "[]") "none" else "present"}, timestamp=${configCache.timestamp}")
-
-                    socket = s
-                    outputStream = os
-                    lastConnectFailMs = 0L
+            // (Re)connect if needed
+            if (s == null || s.isClosed || !s.isConnected) {
+                // Backoff: skip reconnect if last failure was < 1s ago
+                val now = System.currentTimeMillis()
+                if (lastConnectFailMs != 0L && now - lastConnectFailMs < 1000) {
+                    return
                 }
 
-                val data = (line + "\n").toByteArray(Charsets.UTF_8)
-                os?.write(data)
+                Logger.Hook.d(TAG, "Attempting TCP connect to $HOST:${CaptureProtocol.PORT} ...")
+                s = Socket(HOST, CaptureProtocol.PORT)
+                s.soTimeout = 5000 // 5s read timeout for config lines
+                os = s.getOutputStream()
+                Logger.Hook.i(TAG, "TCP connected to $HOST:${CaptureProtocol.PORT}")
+
+                // AUTH handshake immediately after connect
+                val authBytes = "${CaptureProtocol.AUTH_PREFIX}${CaptureProtocol.AUTH_TOKEN}\n"
+                    .toByteArray(Charsets.UTF_8)
+                os?.write(authBytes)
                 os?.flush()
-            } catch (e: Throwable) {
-                Logger.Hook.w(TAG, "sendLine failed: ${e.javaClass.simpleName}: ${e.message}")
-                // Any failure --> record timestamp, tear down so next call reconnects
-                lastConnectFailMs = System.currentTimeMillis()
-                try {
-                    outputStream?.close()
-                } catch (_: Throwable) {}
-                try {
-                    socket?.close()
-                } catch (_: Throwable) {}
-                socket = null
-                outputStream = null
+                Logger.Hook.d(TAG, "AUTH sent to server")
+
+                // Read config lines pushed by the App
+                val reader = BufferedReader(
+                    InputStreamReader(s.getInputStream(), Charsets.UTF_8)
+                )
+                readConfigFromServer(reader)
+
+                Logger.Hook.i(TAG, "AUTH+config sync complete, configCache updated: globalEnabled=${configCache.globalEnabled}, captureEnabled=${configCache.captureEnabled}, devices=${if (configCache.devicesJson == "[]") "none" else "present"}, timestamp=${configCache.timestamp}")
+
+                socket = s
+                outputStream = os
+                lastConnectFailMs = 0L
             }
+
+            val data = (line + "\n").toByteArray(Charsets.UTF_8)
+            os?.write(data)
+            os?.flush()
+        } catch (e: Throwable) {
+            Logger.Hook.w(TAG, "sendLine failed: ${e.javaClass.simpleName}: ${e.message}")
+            // Any failure --> record timestamp, tear down so next call reconnects
+            lastConnectFailMs = System.currentTimeMillis()
+            try {
+                outputStream?.close()
+            } catch (_: Throwable) {}
+            try {
+                socket?.close()
+            } catch (_: Throwable) {}
+            socket = null
+            outputStream = null
         }
     }
 

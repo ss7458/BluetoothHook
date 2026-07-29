@@ -1,5 +1,9 @@
 package com.jingyu233.bluetoothhook.hook
 
+import android.app.ActivityThread
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.content.Intent
 import com.jingyu233.bluetoothhook.data.model.VirtualDevice
 import com.jingyu233.bluetoothhook.utils.Logger
 import de.robv.android.xposed.XC_MethodHook
@@ -349,6 +353,10 @@ class BluetoothScanHook(
                     }
                     if (cachedGlobalEnabled) {
                         injectVirtualDevicesAdaptive(instance)
+                        // 每 10 个 tick (~5秒) 发一次 classic BT 发现广播
+                        if (tickCount % 10 == 0) {
+                            injectClassicDiscoveryBroadcast()
+                        }
                     } else {
                         if (tickCount % 20 == 0) {
                             Logger.Hook.d(TAG, "Periodic tick #$tickCount: global_enabled=false, skipping injection")
@@ -577,6 +585,62 @@ class BluetoothScanHook(
         } catch (e: Throwable) {
             Logger.Hook.d(TAG, "reflect/op failed: getIntField($fieldName) – ${e.message}")
             null
+        }
+    }
+
+    // ── 经典蓝牙发现广播注入 ────────────────────────────────
+
+    /**
+     * 读取设备 JSON 供经典蓝牙广播注入使用。
+     * 优先使用 CaptureSocket 的 TCP 同步缓存，fallback 到 XSharedPreferences。
+     */
+    private fun readDevicesJsonForClassic(): String {
+        val synced = CaptureSocket.configCache
+        if (synced.devicesJson != "[]" && synced.timestamp > 0L) {
+            return synced.devicesJson
+        }
+        try {
+            prefs.reload()
+            val fromPrefs = prefs.getString("devices", "[]") ?: "[]"
+            if (fromPrefs != "[]") return fromPrefs
+        } catch (_: Throwable) {}
+        return "[]"
+    }
+
+    /**
+     * 发送 [BluetoothDevice.ACTION_FOUND] 广播，使虚拟设备出现在系统蓝牙设置中。
+     * 每 ~5 秒执行一次（由调用方控制频率）。
+     */
+    private fun injectClassicDiscoveryBroadcast() {
+        try {
+            val devicesJson = readDevicesJsonForClassic()
+            if (devicesJson == "[]") return
+
+            val devices = Json.decodeFromString<List<VirtualDevice>>(devicesJson)
+            val enabledDevices = devices.filter { it.enabled }
+            if (enabledDevices.isEmpty()) return
+
+            // 获取系统 Context
+            val context = ActivityThread.currentApplication() ?: return
+
+            for (device in enabledDevices) {
+                try {
+                    val adapter = BluetoothAdapter.getDefaultAdapter() ?: continue
+                    val btDevice = adapter.getRemoteDevice(device.mac) ?: continue
+
+                    val intent = Intent(BluetoothDevice.ACTION_FOUND).apply {
+                        putExtra(BluetoothDevice.EXTRA_DEVICE, btDevice)
+                        putExtra(BluetoothDevice.EXTRA_RSSI, device.rssi)
+                        putExtra(BluetoothDevice.EXTRA_NAME, device.name)
+                    }
+                    context.sendBroadcast(intent)
+                    Logger.Hook.i(TAG, "Classic BT broadcast: ${device.name} (${device.mac})")
+                } catch (e: Throwable) {
+                    Logger.Hook.d(TAG, "Classic BT per-device error: ${e.message}")
+                }
+            }
+        } catch (e: Throwable) {
+            Logger.Hook.d(TAG, "Classic BT inject error: ${e.message}")
         }
     }
 

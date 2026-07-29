@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -50,6 +51,29 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     private val _bleScanning = MutableStateFlow(BleScanManager.isScanning)
     val bleScanning: StateFlow<Boolean> = _bleScanning.asStateFlow()
 
+    // ── 过滤 ────────────────────────────────────────────────
+    val rssiMinFilter = MutableStateFlow<Int?>(null)
+    val rssiMaxFilter = MutableStateFlow<Int?>(null)
+    val macFilterPattern = MutableStateFlow("")
+
+    /** 是否有激活的过滤条件 */
+    val hasActiveFilter: StateFlow<Boolean> = combine(
+        rssiMinFilter, rssiMaxFilter, macFilterPattern
+    ) { min, max, mac ->
+        min != null || max != null || mac.isNotBlank()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    /** 经过过滤后的记录列表 */
+    val filteredRecords: StateFlow<List<CaptureRecord>> = combine(
+        captureRecords, rssiMinFilter, rssiMaxFilter, macFilterPattern
+    ) { records, min, max, mac ->
+        records.filter { rec ->
+            (min == null || rec.rssi >= min) &&
+            (max == null || rec.rssi <= max) &&
+            (mac.isBlank() || macMatches(rec.mac, mac))
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), captureRecords.value)
+
     init {
         viewModelScope.launch {
             CaptureBridge.hookStatus.collect {
@@ -58,6 +82,27 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
         }
+    }
+
+    fun setRssiMinFilter(value: Int?) { rssiMinFilter.value = value }
+    fun setRssiMaxFilter(value: Int?) { rssiMaxFilter.value = value }
+    fun setMacFilterPattern(value: String) { macFilterPattern.value = value }
+    fun clearFilters() {
+        rssiMinFilter.value = null
+        rssiMaxFilter.value = null
+        macFilterPattern.value = ""
+    }
+
+    /** 简单的 MAC 通配符匹配：?=单字符, *=多字符 */
+    private fun macMatches(mac: String, pattern: String): Boolean {
+        val regex = pattern
+            .replace(".", "\\.")
+            .replace("?", ".")
+            .replace("*", ".*")
+            .replace(":", "\\:")
+        return try {
+            mac.matches(Regex(regex, RegexOption.IGNORE_CASE))
+        } catch (_: Exception) { true }
     }
 
     fun setCaptureEnabled(enabled: Boolean) {

@@ -47,14 +47,20 @@ import java.util.Locale
 @Composable
 fun CaptureScreen(
     onNavigateBack: () -> Unit,
+    onNavigateToDetail: (Long) -> Unit,
     viewModel: CaptureViewModel = viewModel()
 ) {
-    val records by viewModel.captureRecords.collectAsState()
+    val records by viewModel.filteredRecords.collectAsState()
+    val allRecords by viewModel.captureRecords.collectAsState()
     val serverError by viewModel.serverError.collectAsState()
     val hookStatus by viewModel.hookStatus.collectAsState()
     val isListening by viewModel.isListening.collectAsState()
     val captureEnabled by viewModel.captureEnabled.collectAsState()
     val bleScanning by viewModel.bleScanning.collectAsState()
+    val rssiMin by viewModel.rssiMinFilter.collectAsState()
+    val rssiMax by viewModel.rssiMaxFilter.collectAsState()
+    val macPattern by viewModel.macFilterPattern.collectAsState()
+    var showFilter by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     // BLE 扫描权限
@@ -148,7 +154,7 @@ fun CaptureScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
-            // BLE 扫描控制
+            // 合并的控制行（App扫描 + 抓包开关 + 操作按钮）
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -157,31 +163,22 @@ fun CaptureScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // App扫描开关（图标+Switch精简）
                     Icon(
                         imageVector = Icons.Default.BluetoothSearching,
                         contentDescription = null,
                         tint = if (bleScanning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "App 内扫描",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = if (bleScanning)
-                                "BLE 扫描运行中"
-                            else
-                                "开启后触发Hook注入",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "扫描",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium
+                    )
                     Switch(
                         checked = bleScanning,
                         onCheckedChange = {
@@ -197,92 +194,100 @@ fun CaptureScreen(
                                     blePermissionLauncher.launch(blePermissions)
                                 }
                             }
-                        }
+                        },
+                        modifier = Modifier.height(28.dp)
                     )
-                }
-            }
 
-            // 控制行
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                    Spacer(modifier = Modifier.width(8.dp))
+
                     // 抓包开关
                     Text(
-                        text = "抓包开关",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(end = 4.dp)
+                        text = "抓包",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium
                     )
                     Switch(
                         checked = captureEnabled,
-                        onCheckedChange = { viewModel.setCaptureEnabled(it) }
+                        onCheckedChange = { viewModel.setCaptureEnabled(it) },
+                        modifier = Modifier.height(28.dp)
                     )
 
                     Spacer(modifier = Modifier.weight(1f))
 
+                    // 过滤切换按钮
+                    IconButton(
+                        onClick = { showFilter = !showFilter },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            if (showFilter) Icons.Default.FilterListOff else Icons.Default.FilterList,
+                            contentDescription = "过滤",
+                            tint = if (viewModel.hasActiveFilter()) MaterialTheme.colorScheme.primary
+                                   else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
                     // 已捕获条数徽标
-                    if (records.isNotEmpty()) {
+                    if (allRecords.isNotEmpty()) {
                         Surface(
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(10.dp),
                             color = MaterialTheme.colorScheme.secondaryContainer,
-                            modifier = Modifier.padding(end = 8.dp)
+                            modifier = Modifier.padding(end = 4.dp)
                         ) {
                             Text(
-                                text = "${records.size}",
+                                text = "${allRecords.size}",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                             )
                         }
                     }
 
-                    // 导出按钮
-                    FilledTonalButton(
+                    // 导出按钮（仅图标）
+                    IconButton(
                         onClick = {
-                            val timestamp = SimpleDateFormat(
-                                "yyyyMMdd_HHmmss",
-                                Locale.getDefault()
-                            ).format(Date())
+                            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
                             exportLauncher.launch("bluetooth_capture_$timestamp.csv")
                         },
-                        enabled = records.isNotEmpty(),
-                        modifier = Modifier.padding(end = 8.dp)
+                        enabled = allRecords.isNotEmpty(),
+                        modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
                             Icons.Default.Share,
-                            contentDescription = "导出",
+                            contentDescription = "导出CSV",
                             modifier = Modifier.size(18.dp)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("导出", style = MaterialTheme.typography.labelMedium)
                     }
 
-                    // 清空按钮
-                    FilledTonalButton(
+                    // 清空按钮（仅图标）
+                    IconButton(
                         onClick = { viewModel.clear() },
-                        enabled = records.isNotEmpty(),
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer,
-                            contentColor = MaterialTheme.colorScheme.onErrorContainer
-                        )
+                        enabled = allRecords.isNotEmpty(),
+                        modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
                             Icons.Default.Delete,
                             contentDescription = "清空",
+                            tint = MaterialTheme.colorScheme.error,
                             modifier = Modifier.size(18.dp)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("清空", style = MaterialTheme.typography.labelMedium)
                     }
                 }
+            }
+
+            // 过滤条（可折叠）
+            if (showFilter) {
+                FilterBar(
+                    rssiMin = rssiMin,
+                    rssiMax = rssiMax,
+                    macPattern = macPattern,
+                    onRssiMinChange = { viewModel.setRssiMinFilter(it) },
+                    onRssiMaxChange = { viewModel.setRssiMaxFilter(it) },
+                    onMacPatternChange = { viewModel.setMacFilterPattern(it) },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
             }
 
             // 记录列表 / 空状态
@@ -304,7 +309,10 @@ fun CaptureScreen(
                             items = records,
                             key = { _, record -> record.id }
                         ) { _, record ->
-                            CaptureRecordCard(record = record)
+                            CaptureRecordCard(
+                                record = record,
+                                onDataClick = { onNavigateToDetail(record.id) }
+                            )
                         }
                     }
 
@@ -342,11 +350,72 @@ private fun PulsingDot() {
     )
 }
 
+// ── 过滤条组件 ────────────────────────────────────────────
+
+@Composable
+private fun FilterBar(
+    rssiMin: Int?,
+    rssiMax: Int?,
+    macPattern: String,
+    onRssiMinChange: (Int?) -> Unit,
+    onRssiMaxChange: (Int?) -> Unit,
+    onMacPatternChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text("过滤条件", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("RSSI:", style = MaterialTheme.typography.bodySmall)
+                Spacer(modifier = Modifier.width(4.dp))
+                OutlinedTextField(
+                    value = rssiMin?.toString() ?: "",
+                    onValueChange = { onRssiMinChange(it.toIntOrNull()) },
+                    placeholder = { Text("最小", style = MaterialTheme.typography.bodySmall) },
+                    modifier = Modifier.width(64.dp).height(48.dp),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodySmall
+                )
+                Text(" ~ ", style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(
+                    value = rssiMax?.toString() ?: "",
+                    onValueChange = { onRssiMaxChange(it.toIntOrNull()) },
+                    placeholder = { Text("最大", style = MaterialTheme.typography.bodySmall) },
+                    modifier = Modifier.width(64.dp).height(48.dp),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodySmall
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("dBm", style = MaterialTheme.typography.bodySmall)
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("MAC:", style = MaterialTheme.typography.bodySmall)
+                Spacer(modifier = Modifier.width(4.dp))
+                OutlinedTextField(
+                    value = macPattern,
+                    onValueChange = onMacPatternChange,
+                    placeholder = { Text("?匹配单字符 *匹配多字符", style = MaterialTheme.typography.bodySmall) },
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodySmall
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text("例: AA:??:??:??:??:* 或 *:FF:*", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
 /**
  * 单条抓包记录卡片
  */
 @Composable
-private fun CaptureRecordCard(record: CaptureRecord) {
+private fun CaptureRecordCard(
+    record: CaptureRecord,
+    onDataClick: () -> Unit
+) {
     val timeFormat = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()) }
     val rssiColor = when {
         record.rssi > -60 -> Color(0xFF4CAF50)   // 强
@@ -400,7 +469,7 @@ private fun CaptureRecordCard(record: CaptureRecord) {
                 }
             }
 
-            // 第二行：广播数据（可横向滚动等宽块）
+            // 第二行：广播数据（可点击跳转到详情页）
             if (record.advDataHex.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Box(
@@ -410,7 +479,8 @@ private fun CaptureRecordCard(record: CaptureRecord) {
                 ) {
                     Surface(
                         shape = RoundedCornerShape(4.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.clickable { onDataClick() }
                     ) {
                         Text(
                             text = record.advDataHex,
@@ -425,24 +495,24 @@ private fun CaptureRecordCard(record: CaptureRecord) {
                 }
             }
 
-            // 第三行：附加参数
+            // 第三行：附加参数（含中文标注）
             Spacer(modifier = Modifier.height(4.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    text = "Event: ${record.eventType}",
+                    text = "Event: ${record.eventTypeLabel}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "Phy: ${record.primaryPhy}",
+                    text = "Phy: ${record.phyLabel}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "AddrType: ${record.addressType}",
+                    text = "Addr: ${record.addressTypeLabel}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

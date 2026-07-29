@@ -6,6 +6,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.jingyu233.bluetoothhook.data.bridge.CaptureBridge
+import com.jingyu233.bluetoothhook.ui.screen.CaptureDetailScreen
 import com.jingyu233.bluetoothhook.ui.screen.CaptureScreen
 import com.jingyu233.bluetoothhook.ui.screen.DeviceEditorScreen
 import com.jingyu233.bluetoothhook.ui.screen.DeviceListScreen
@@ -21,6 +23,9 @@ sealed class Screen(val route: String) {
             if (deviceId != null) "device_editor/$deviceId" else "device_editor/new"
     }
     object CaptureLog : Screen("capture_log")
+    object CaptureDetail : Screen("capture_detail/{recordId}") {
+        fun createRoute(recordId: Long) = "capture_detail/$recordId"
+    }
     object Settings : Screen("settings")
 }
 
@@ -72,6 +77,22 @@ fun BluetoothHookNavigation() {
         // 扫描抓包屏幕
         composable(Screen.CaptureLog.route) {
             CaptureScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToDetail = { recordId ->
+                    navController.navigate(Screen.CaptureDetail.createRoute(recordId))
+                }
+            )
+        }
+
+        // 抓包详情屏幕
+        composable(
+            route = Screen.CaptureDetail.route,
+            arguments = listOf(navArgument("recordId") { type = NavType.LongType })
+        ) { backStackEntry ->
+            val recordId = backStackEntry.arguments?.getLong("recordId") ?: -1L
+            val record = CaptureBridge.captureRecords.value.find { it.id == recordId }
+            CaptureDetailScreen(
+                record = record,
                 onNavigateBack = { navController.popBackStack() }
             )
         }

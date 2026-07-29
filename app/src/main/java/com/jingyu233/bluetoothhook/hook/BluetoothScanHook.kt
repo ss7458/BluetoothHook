@@ -27,10 +27,10 @@ class BluetoothScanHook(
 
         /** 候选类，按顺序尝试 */
         private val CANDIDATE_CLASSES = arrayOf(
-            // AOSP / 原生
-            "com.android.bluetooth.le_scan.ScanController",
+            // AOSP / 原生 (ScanController 是 TransitionalScanHelper 的 wrapper，无 scan 回调)
             "com.android.bluetooth.le_scan.TransitionalScanHelper",
-            "com.android.bluetooth.gatt.ScanManager",
+            "com.android.bluetooth.le_scan.ScanController",
+            "com.android.bluetooth.le_scan.ScanManager",
             // 小米 HyperOS
             "com.android.bluetooth.le_scan.ScanControllerWrapper",
             "com.android.bluetooth.le_scan.BluetoothLeScannerImpl",
@@ -235,16 +235,22 @@ class BluetoothScanHook(
             ?: stringParams.firstOrNull()
             ?: ""
 
-        // ---- 2. 按 AOSP 相对偏移提取 int 参数 ----
+        // ---- 2. 按 AOSP 固定索引提取 int 参数 ----
+        // onScanResultInternal 签名 (11 params, AOSP 标准):
+        //   [0]=eventType, [1]=addressType, [2]=address(String), [3]=primaryPhy,
+        //   [4]=secondaryPhy, [5]=advertisingSid, [6]=txPower, [7]=rssi,
+        //   [8]=periodicAdvInterval, [9]=scanRecord(byte[]), [10]=timestampNanos(String)
+        // 注意：之前用的相对偏移 (si-3, si-5) 会将 eventType 误读为 txPower 等，
+        // 经 JADX 验证 TransitionalScanHelper 签名固定，故改用固定索引。
         val si = scanRecordIndex
         if (si < 0) return // 没有 byte[]，无法定位
 
-        val rssi: Int          = tryIntArg(args, si - 2, 0)
-        val txPower: Int       = tryIntArg(args, si - 1, 0)
-        val periodicAdvInt: Int = tryIntArg(args, si + 1, 0)
-        val eventType: Int     = tryIntArg(args, si - 3, 0)
-        val primaryPhy: Int    = tryIntArg(args, si - 4, 1)
-        val addressType: Int   = tryIntArg(args, si - 5, 0)
+        val eventType: Int     = tryIntArg(args, 0, 0)
+        val addressType: Int   = tryIntArg(args, 1, 0)
+        val primaryPhy: Int    = tryIntArg(args, 3, 1)
+        val rssi: Int          = tryIntArg(args, 7, 0)
+        val txPower: Int       = tryIntArg(args, 6, 0)
+        val periodicAdvInt: Int = tryIntArg(args, 8, 0)
 
         // ---- 3. Throttled prefs reload (max once per second) ----
         reloadPrefsIfNeeded()

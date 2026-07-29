@@ -168,26 +168,50 @@ class VirtualDeviceInjector(
         scanResult: Any
     ) {
         try {
-            // 获取scannerId
-            val scannerId = XposedHelpers.getIntField(scanClient, "mScannerId")
+            // 获取 scannerId（不同 ROM 字段名不同）
+            val scannerId = tryGetIntField(scanClient, "scannerId")
+                ?: tryGetIntField(scanClient, "mScannerId")
+                ?: run {
+                    Logger.Hook.d(TAG, "Failed to get scannerId from ScanClient: ${scanClient.javaClass.name}")
+                    return
+                }
 
-            // 通过scannerMap获取ScannerApp
+            // 通过 scannerMap 获取 ScannerApp
             val scannerApp = XposedHelpers.callMethod(scannerMap, "getById", scannerId)
                 ?: return
 
-            // 获取IScannerCallback
-            val callback = XposedHelpers.getObjectField(scannerApp, "mCallback")
-            if (callback == null) {
-                // 有些客户端使用PendingIntent而不是callback
-                return
-            }
+            // 获取 IScannerCallback（不同 ROM 字段名不同）
+            val callback = tryGetObjectField(scannerApp, "callback")
+                ?: tryGetObjectField(scannerApp, "mCallback")
+                ?: run {
+                    Logger.Hook.d(TAG, "No callback found on scannerApp, skipping client $scannerId")
+                    return
+                }
 
-            // 调用callback.onScanResult(scanResult)
+            // 调用 callback.onScanResult(scanResult)
             XposedHelpers.callMethod(callback, "onScanResult", scanResult)
 
         } catch (e: Throwable) {
             // 某些客户端可能已断开连接，抛出异常让上层处理
             throw e
+        }
+    }
+
+    /** 安全获取 int 字段，不存在时返回 null */
+    private fun tryGetIntField(obj: Any, fieldName: String): Int? {
+        return try {
+            XposedHelpers.getIntField(obj, fieldName)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /** 安全获取 Object 字段，不存在时返回 null */
+    private fun tryGetObjectField(obj: Any, fieldName: String): Any? {
+        return try {
+            XposedHelpers.getObjectField(obj, fieldName)
+        } catch (_: Throwable) {
+            null
         }
     }
 }

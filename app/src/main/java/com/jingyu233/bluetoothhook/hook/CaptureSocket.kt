@@ -47,6 +47,10 @@ object CaptureSocket {
     @Volatile
     private var outputStream: OutputStream? = null
 
+    /** 后台读线程，持续读取 App 推送的 CFG 配置更新 */
+    @Volatile
+    private var readerThread: Thread? = null
+
     /** Timestamp of last connect failure (ms), 0 = no prior failure */
     private var lastConnectFailMs = 0L
 
@@ -85,9 +89,10 @@ object CaptureSocket {
                     return
                 }
 
+                try { s?.close() } catch (_: Throwable) {}
                 Logger.Hook.d(TAG, "Attempting TCP connect to $HOST:${CaptureProtocol.PORT} ...")
                 s = Socket(HOST, CaptureProtocol.PORT)
-                s.soTimeout = 5000 // 5s read timeout for config lines
+                s.soTimeout = 0 // 无超时：Reader 线程阻塞等待 App 推送配置更新
                 os = s.getOutputStream()
                 Logger.Hook.i(TAG, "TCP connected to $HOST:${CaptureProtocol.PORT}")
 
@@ -106,6 +111,13 @@ object CaptureSocket {
 
                 Logger.Hook.i(TAG, "AUTH+config sync complete, configCache updated: globalEnabled=${configCache.globalEnabled}, captureEnabled=${configCache.captureEnabled}, devices=${if (configCache.devicesJson == "[]") "none" else "present"}, timestamp=${configCache.timestamp}")
 
+                // 初始配置读取完毕后禁用超时，让后台读线程无限等待服务端热推送
+                // 避免 5 秒无数据时 readLine() 抛 SocketTimeoutException 导致读线程死亡
+                s.soTimeout = 0
+
+                // 启动后台读线程，持续接收 App 热推送的配置更新
+                startReaderThread(reader, s)
+
                 socket = s
                 outputStream = os
                 lastConnectFailMs = 0L
@@ -118,6 +130,8 @@ object CaptureSocket {
             Logger.Hook.w(TAG, "sendLine failed: ${e.javaClass.simpleName}: ${e.message}")
             // Any failure --> record timestamp, tear down so next call reconnects
             lastConnectFailMs = System.currentTimeMillis()
+            readerThread?.interrupt()
+            readerThread = null
             try {
                 outputStream?.close()
             } catch (_: Throwable) {}
@@ -130,17 +144,90 @@ object CaptureSocket {
     }
 
     /**
+     * 后台读线程：持续从 socket 读取 App 热推送的 CFG 配置行。
+     * 当 socket 断开时自动清理状态，下次 sendLine 会重连。
+     */
+    private fun startReaderThread(reader: BufferedReader, socket: Socket) {
+        readerThread?.interrupt()
+        val thread = Thread({
+            try {
+                var line: String?
+                while (!Thread.currentThread().isInterrupted) {
+                    line = reader.readLine() ?: break
+                    if (line.startsWith("CFG|")) {
+                        processConfigLine(line)
+                    }
+                }
+            } catch (_: Throwable) {
+                // Socket closed or error
+            }
+            // Reader thread ended — socket 已断开，清理状态以便重连
+            Logger.Hook.d(TAG, "Reader thread ended, socket disconnected")
+            try { socket.close() } catch (_: Throwable) {}
+            this.socket = null
+            this.outputStream = null
+        }, "BTHook-SocketReader").apply {
+            isDaemon = true
+            start()
+        }
+        readerThread = thread
+    }
+
+    /**
+     * 处理单条 CFG 配置行，更新 configCache。
+     * 用于后台读线程接收 App 热推送的配置更新。
+     */
+    private fun processConfigLine(line: String) {
+        try {
+            if (line == "CFG|END") {
+                Logger.Hook.d(TAG, "Config hot-push complete")
+                return
+            }
+            val parts = line.split("|", limit = 3)
+            if (parts.size < 3) return
+
+            val current = configCache
+            when (parts[1]) {
+                "global_enabled" -> {
+                    val value = parts[2].toBoolean()
+                    configCache = current.copy(globalEnabled = value)
+                    Logger.Hook.d(TAG, "Config hot-push: global_enabled=$value")
+                }
+                "capture_enabled" -> {
+                    val value = parts[2].toBoolean()
+                    configCache = current.copy(captureEnabled = value)
+                    Logger.Hook.d(TAG, "Config hot-push: capture_enabled=$value")
+                }
+                "devices" -> {
+                    val devicesJson = parts[2]
+                    val devCount = devicesJson.count { it == '{' }
+                    configCache = current.copy(devicesJson = devicesJson, timestamp = System.currentTimeMillis())
+                    Logger.Hook.d(TAG, "Config hot-push: devices ($devCount device(s))")
+                }
+                "classic_interval" -> {
+                    val interval = parts[2].toIntOrNull() ?: 5000
+                    configCache = current.copy(classicIntervalMs = interval)
+                    Logger.Hook.d(TAG, "Config hot-push: classic_interval=${interval}ms")
+                }
+            }
+        } catch (e: Exception) {
+            Logger.Hook.w(TAG, "processConfigLine error: ${e.message}")
+        }
+    }
+
+    /**
      * 从服务器读取 CFG|key|value 行直到 CFG|END。
      * 解析后更新 [configCache]。
      */
     private fun readConfigFromServer(reader: BufferedReader) {
         try {
             var line: String?
-            var globalEnabled = configCache.globalEnabled
-            var captureEnabled = configCache.captureEnabled
-            var devicesJson = configCache.devicesJson
-            var classicIntervalMs = configCache.classicIntervalMs
-            var timestamp = configCache.timestamp
+            val current = configCache
+            var globalEnabled = current.globalEnabled
+            var captureEnabled = current.captureEnabled
+            var devicesJson = current.devicesJson
+            var classicIntervalMs = current.classicIntervalMs
+            var timestamp = current.timestamp
             var configLineCount = 0
 
             while (reader.readLine().also { line = it } != null) {
@@ -178,6 +265,7 @@ object CaptureSocket {
                 globalEnabled = globalEnabled,
                 captureEnabled = captureEnabled,
                 devicesJson = devicesJson,
+                classicIntervalMs = classicIntervalMs,
                 timestamp = timestamp
             )
             Logger.Hook.d(TAG, "readConfigFromServer finished, $configLineCount line(s) read")
@@ -185,5 +273,17 @@ object CaptureSocket {
             Logger.Hook.w(TAG, "readConfigFromServer error: ${e.message}")
             // 读取配置失败时保留旧缓存
         }
+    }
+
+    /**
+     * 关闭读线程和 socket，清理所有状态。
+     */
+    fun shutdown() {
+        readerThread?.interrupt()
+        readerThread = null
+        try { outputStream?.close() } catch (_: Throwable) {}
+        try { socket?.close() } catch (_: Throwable) {}
+        socket = null
+        outputStream = null
     }
 }

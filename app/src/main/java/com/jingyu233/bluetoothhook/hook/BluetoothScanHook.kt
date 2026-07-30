@@ -10,9 +10,12 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import java.io.File
+import java.util.Collections
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 蓝牙扫描Hook核心类（自适应版本）
@@ -53,6 +56,7 @@ class BluetoothScanHook(
 
         private const val METHOD_NAME = "onScanResultInternal"
         private val MAC_REGEX = Regex("^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
+        private val json = Json { ignoreUnknownKeys = true }
     }
 
     private lateinit var scanResultBuilder: ScanResultBuilder
@@ -61,7 +65,8 @@ class BluetoothScanHook(
     // ── 自适应发现/解析跟踪 ──────────────────────────────────
     private var classFound: String = "NONE"
     private var methodFound: String = "NONE"
-    private val resolvedFields: MutableSet<String> = mutableSetOf()
+    private val resolvedFields: MutableSet<String> = Collections.synchronizedSet(mutableSetOf<String>())
+    @Volatile
     private var hasInjectedOnce = false
 
     /** 最近一次扫描回调的 ScanController 实例，供定时注入使用 */
@@ -69,14 +74,21 @@ class BluetoothScanHook(
     private var cachedScanInstance: Any? = null
 
     // ── Cached reflection results (resolved once, reset on error) ─
+    @Volatile
     private var cachedScanManager: Any? = null
+    @Volatile
     private var cachedScannerMap: Any? = null
+    @Volatile
     private var cachedScanQueue: Collection<*>? = null
+    @Volatile
     private var resolveAttempted = false
 
     // ── Prefs reload throttling ──────────────────────────────
+    @Volatile
     private var lastPrefReloadMs = 0L
+    @Volatile
     private var cachedCaptureEnabled = false
+    @Volatile
     private var cachedGlobalEnabled = true
 
     // ── 初始化 ───────────────────────────────────────────────
@@ -200,7 +212,7 @@ class BluetoothScanHook(
     // ── afterHookedMethod 处理 ───────────────────────────────
 
     /** 统计：记录 handleScanResult 被调用的次数 */
-    private var scanResultCallCount = 0
+    private val scanResultCallCount = AtomicInteger(0)
 
     /**
      * 按参数类型而非固定位置提取真实扫描结果，然后执行 Capture + 注入。
@@ -209,11 +221,11 @@ class BluetoothScanHook(
         val args = param.args ?: return
         if (args.isEmpty()) return
 
-        scanResultCallCount++
+        scanResultCallCount.incrementAndGet()
         cachedScanInstance = param.thisObject
 
         // 前 5 次 + 每 100 次记录详细日志
-        if (scanResultCallCount <= 5 || scanResultCallCount % 100 == 1) {
+        if (scanResultCallCount.get() <= 5 || scanResultCallCount.get() % 100 == 1) {
             val argTypes = args.map { it?.javaClass?.simpleName ?: "null" }.joinToString(", ")
             val argValues = args.mapIndexed { idx, arg ->
                 when (arg) {
@@ -223,7 +235,7 @@ class BluetoothScanHook(
                     else -> arg.toString()
                 }
             }.joinToString(", ")
-            Logger.Hook.i(TAG, "handleScanResult #$scanResultCallCount: ${args.size} args, types=[$argTypes], values=[$argValues]")
+            Logger.Hook.i(TAG, "handleScanResult #${scanResultCallCount.get()}: ${args.size} args, types=[$argTypes], values=[$argValues]")
         }
 
         // ---- 1. 按类型提取参数 ----
@@ -347,9 +359,7 @@ class BluetoothScanHook(
                     reloadPrefsIfNeeded(force = true)
                     val instance = cachedScanInstance
                     if (instance == null) {
-                        if (tickCount % 20 == 0) {
-                            Logger.Hook.d(TAG, "Periodic tick #$tickCount: cachedScanInstance is null, waiting for scan session")
-                        }
+                        // 静默等待 scan session，不刷日志
                         continue
                     }
                     if (cachedGlobalEnabled) {
@@ -363,9 +373,7 @@ class BluetoothScanHook(
                             injectClassicDiscoveryBroadcast()
                         }
                     } else {
-                        if (tickCount % 20 == 0) {
-                            Logger.Hook.d(TAG, "Periodic tick #$tickCount: global_enabled=false, skipping injection")
-                        }
+                        // global_enabled=false 时静默跳过，不刷日志
                     }
                 } catch (_: InterruptedException) {
                     periodicInjectorRunning = false
@@ -384,6 +392,10 @@ class BluetoothScanHook(
         val now = System.currentTimeMillis()
         if (!force && now - lastPrefReloadMs <= 1000) return
 
+        // 保存旧值用于比较
+        val prevCapture = cachedCaptureEnabled
+        val prevGlobal = cachedGlobalEnabled
+
         // 1) 优先使用 TCP 同步的配置（绕过 XSharedPreferences SELinux 问题）
         val synced = CaptureSocket.configCache
         cachedCaptureEnabled = synced.captureEnabled
@@ -391,31 +403,34 @@ class BluetoothScanHook(
         lastPrefReloadMs = now
         var prefsSource = "tcp"
 
-        // 2) 尝试 XSharedPreferences 作为 fallback
-        try {
-            prefs.reload()
-            val prefsCapture = prefs.getBoolean("capture_enabled", cachedCaptureEnabled)
-            val prefsGlobal = prefs.getBoolean("global_enabled", cachedGlobalEnabled)
-            if (prefsCapture != cachedCaptureEnabled || prefsGlobal != cachedGlobalEnabled) {
-                cachedCaptureEnabled = prefsCapture
-                cachedGlobalEnabled = prefsGlobal
-                prefsSource = "xsp"
-                Logger.Hook.d(TAG, "Config updated from XSP: global=$cachedGlobalEnabled, capture=$cachedCaptureEnabled")
-            }
-        } catch (e: Throwable) { }
+        // 2) XSharedPreferences / 文件回退仅在 TCP 配置无效时使用
+        if (synced.timestamp == 0L) {
+            try {
+                prefs.reload()
+                val prefsCapture = prefs.getBoolean("capture_enabled", cachedCaptureEnabled)
+                val prefsGlobal = prefs.getBoolean("global_enabled", cachedGlobalEnabled)
+                if (prefsCapture != cachedCaptureEnabled || prefsGlobal != cachedGlobalEnabled) {
+                    cachedCaptureEnabled = prefsCapture
+                    cachedGlobalEnabled = prefsGlobal
+                    prefsSource = "xsp"
+                }
+            } catch (e: Throwable) { }
+        }
 
-        // 3) 尝试文件回退（/data/local/tmp/bthook_config.json）
+        // 3) 始终检查文件回退的设备列表（/data/local/tmp/bthook_config.json）
+        //    TCP 热推送可能因连接断开而失败，文件回退作为安全网确保设备列表始终最新
         try {
             val fallbackFile = File("/data/local/tmp/bthook_config.json")
             if (fallbackFile.exists()) {
                 val text = fallbackFile.readText()
-                val json = Json { ignoreUnknownKeys = true }
                 val obj = json.decodeFromString<Map<String, JsonElement>>(text)
-                val fileGlobalStr = obj["global_enabled"]?.toString()
-                val fileCaptureStr = obj["capture_enabled"]?.toString()
-                val fileGlobal = if (fileGlobalStr == "true") true else if (fileGlobalStr == "false") false else null
-                val fileCapture = if (fileCaptureStr == "true") true else if (fileCaptureStr == "false") false else null
-                if (fileGlobal != null || fileCapture != null) {
+
+                if (synced.timestamp == 0L) {
+                    // TCP 无效时，也从文件读取 global/capture
+                    val fileGlobalStr = obj["global_enabled"]?.toString()
+                    val fileCaptureStr = obj["capture_enabled"]?.toString()
+                    val fileGlobal = if (fileGlobalStr == "true") true else if (fileGlobalStr == "false") false else null
+                    val fileCapture = if (fileCaptureStr == "true") true else if (fileCaptureStr == "false") false else null
                     if (fileGlobal != null) cachedGlobalEnabled = fileGlobal
                     if (fileCapture != null) cachedCaptureEnabled = fileCapture
                     prefsSource = "file"
@@ -423,7 +438,10 @@ class BluetoothScanHook(
             }
         } catch (e: Throwable) { }
 
-        Logger.Hook.d(TAG, "Config reloaded: source=$prefsSource, global=$cachedGlobalEnabled, capture=$cachedCaptureEnabled")
+        // 仅在配置实际变化时记录日志，避免高频刷屏
+        if (cachedCaptureEnabled != prevCapture || cachedGlobalEnabled != prevGlobal || force) {
+            Logger.Hook.d(TAG, "Config reloaded: source=$prefsSource, global=$cachedGlobalEnabled, capture=$cachedCaptureEnabled")
+        }
     }
 
     // ── 注入（自适应字段解析） ────────────────────────────────
@@ -447,8 +465,8 @@ class BluetoothScanHook(
                 if (cachedScanManager != null) {
                     cachedScannerMap = resolveScannerMap(instance, cachedScanManager!!)
                     cachedScanQueue = resolveScanQueue(cachedScanManager!!)
+                    resolveAttempted = true
                 }
-                resolveAttempted = true
                 Logger.Hook.i(TAG, "Resolution result: scanManager=${cachedScanManager != null}, scannerMap=${cachedScannerMap != null}, scanQueue=${cachedScanQueue?.size ?: "null"}")
             }
 
@@ -609,6 +627,22 @@ class BluetoothScanHook(
             val fromPrefs = prefs.getString("devices", "[]") ?: "[]"
             if (fromPrefs != "[]") return fromPrefs
         } catch (_: Throwable) {}
+
+        // 文件回退
+        try {
+            val fallbackFile = File("/data/local/tmp/bthook_config.json")
+            if (fallbackFile.exists()) {
+                val text = fallbackFile.readText()
+                val obj = json.decodeFromString<Map<String, JsonElement>>(text)
+                val devicesStr = obj["devices"]?.toString()
+                if (devicesStr != null && devicesStr != "[]" && devicesStr != "\"[]\"") {
+                    val cleaned = if (devicesStr.startsWith("\"") && devicesStr.endsWith("\"")) {
+                        devicesStr.substring(1, devicesStr.length - 1).replace("\\\"", "\"")
+                    } else devicesStr
+                    if (cleaned != "[]") return cleaned
+                }
+            }
+        } catch (_: Throwable) {}
         return "[]"
     }
 
@@ -621,7 +655,7 @@ class BluetoothScanHook(
             val devicesJson = readDevicesJsonForClassic()
             if (devicesJson == "[]") return
 
-            val devices = Json.decodeFromString<List<VirtualDevice>>(devicesJson)
+            val devices = json.decodeFromString<List<VirtualDevice>>(devicesJson)
             val enabledDevices = devices.filter { it.enabled }
             if (enabledDevices.isEmpty()) return
 
@@ -636,9 +670,10 @@ class BluetoothScanHook(
                 return
             }
 
+            val adapter = BluetoothAdapter.getDefaultAdapter() ?: return
+
             for (device in enabledDevices) {
                 try {
-                    val adapter = BluetoothAdapter.getDefaultAdapter() ?: continue
                     val btDevice = adapter.getRemoteDevice(device.mac) ?: continue
 
                     val intent = Intent(BluetoothDevice.ACTION_FOUND).apply {
@@ -669,7 +704,7 @@ class BluetoothScanHook(
         if (devicesJson == "[]") return
 
         val devices = try {
-            Json.decodeFromString<List<VirtualDevice>>(devicesJson)
+            json.decodeFromString<List<VirtualDevice>>(devicesJson)
         } catch (_: Throwable) { return }
 
         val enabledDevices = devices.filter { it.enabled }

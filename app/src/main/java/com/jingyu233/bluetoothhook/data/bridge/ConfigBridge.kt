@@ -26,12 +26,12 @@ class ConfigBridge(private val context: Context) {
         const val KEY_CAPTURE_ENABLED = "capture_enabled"
         private const val KEY_CLASSIC_INTERVAL_MS = "classic_interval_ms"
         private const val KEY_LAST_UPDATED = "last_updated"
-    }
 
-    private val json = Json {
-        ignoreUnknownKeys = true
-        encodeDefaults = true
-        prettyPrint = false
+        private val json = Json {
+            ignoreUnknownKeys = true
+            encodeDefaults = true
+            prettyPrint = false
+        }
     }
 
     /**
@@ -47,9 +47,9 @@ class ConfigBridge(private val context: Context) {
             val devicesJson = json.encodeToString(devices)
 
             // 使用commit()而不是apply()确保立即写入
+            // 注意：只写入设备列表相关数据，不重新写入 globalEnabled（避免 read-modify-write 竞态）
             prefs.edit()
                 .putString(KEY_DEVICES, devicesJson)
-                .putBoolean(KEY_GLOBAL_ENABLED, getGlobalEnabled())
                 .putLong(KEY_LAST_UPDATED, System.currentTimeMillis())
                 .commit() // 立即同步写入
 
@@ -59,6 +59,9 @@ class ConfigBridge(private val context: Context) {
             ensurePrefsWorldReadable()
             // 写入文件回退（/data/local/tmp/bthook_config.json）
             writeFallbackConfigFile()
+
+            // 通过 TCP 热推送配置到已连接的 Hook 进程
+            com.jingyu233.bluetoothhook.data.bridge.CaptureBridge.pushConfigUpdate()
 
         } catch (e: SecurityException) {
             Logger.App.e(TAG, "MODE_PRIVATE — SecurityException unexpected, check LSPosed?", e)
@@ -83,6 +86,9 @@ class ConfigBridge(private val context: Context) {
             writeFallbackConfigFile()
 
             Logger.App.d(TAG, "Set global_enabled = $enabled")
+
+            // 通过 TCP 热推送配置到已连接的 Hook 进程
+            com.jingyu233.bluetoothhook.data.bridge.CaptureBridge.pushConfigUpdate()
 
         } catch (e: Exception) {
             Logger.App.e(TAG, "Failed to set global enabled state", e)
@@ -119,6 +125,9 @@ class ConfigBridge(private val context: Context) {
 
             Logger.App.d(TAG, "Set capture_enabled = $enabled")
 
+            // 通过 TCP 热推送配置到已连接的 Hook 进程
+            com.jingyu233.bluetoothhook.data.bridge.CaptureBridge.pushConfigUpdate()
+
         } catch (e: Exception) {
             Logger.App.e(TAG, "Failed to set capture enabled state", e)
         }
@@ -145,10 +154,14 @@ class ConfigBridge(private val context: Context) {
             val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             prefs.edit()
                 .putInt(KEY_CLASSIC_INTERVAL_MS, ms)
+                .putLong(KEY_LAST_UPDATED, System.currentTimeMillis())
                 .commit()
             ensurePrefsWorldReadable()
             writeFallbackConfigFile()
             Logger.App.d(TAG, "Set classic_interval = ${ms}ms")
+
+            // 通过 TCP 热推送配置到已连接的 Hook 进程
+            com.jingyu233.bluetoothhook.data.bridge.CaptureBridge.pushConfigUpdate()
         } catch (e: Exception) {
             Logger.App.e(TAG, "Failed to set classic interval", e)
         }
@@ -195,6 +208,11 @@ class ConfigBridge(private val context: Context) {
 
     /**
      * 清空所有配置
+     *
+     * 注意：此方法清除 SharedPreferences 中的配置数据，但无法清除
+     * Preferences DataStore 中的数据（DataStore 使用独立的文件格式，
+     * 不存储在 SharedPreferences 中）。DataStore 数据需要通过
+     * SettingsDataStore.clearAll() 单独清除。
      */
     fun clearAll() {
         try {
@@ -204,7 +222,7 @@ class ConfigBridge(private val context: Context) {
             val appPrefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
             appPrefs.edit().clear().apply()
 
-            Logger.App.w(TAG, "Cleared all configuration")
+            Logger.App.w(TAG, "Cleared all configuration (SharedPreferences only; DataStore requires separate clear)")
 
             // 覆盖回退文件，防止 Hook 进程读到过期配置
             writeFallbackConfigFile()
@@ -250,7 +268,9 @@ class ConfigBridge(private val context: Context) {
             val classicInterval = prefs.getInt(KEY_CLASSIC_INTERVAL_MS, 5000)
             val configJson = """{"global_enabled":$globalEnabled,"capture_enabled":$captureEnabled,"classic_interval_ms":$classicInterval,"devices":$devicesJson}"""
             val fallbackFile = File(fallbackDir, "bthook_config.json")
-            fallbackFile.writeText(configJson, Charsets.UTF_8)
+            val tmpFile = File(fallbackDir, "bthook_config.json.tmp")
+            tmpFile.writeText(configJson, Charsets.UTF_8)
+            tmpFile.renameTo(fallbackFile)
             fallbackFile.setReadable(true, false)
 
             Logger.App.d(TAG, "Fallback config written to ${fallbackFile.absolutePath}")

@@ -699,8 +699,13 @@ class BluetoothScanHook(
      * 此 fallback 使用适配后的字段名逐客户端投递。
      */
     private fun adaptivePerClientDelivery(scannerMap: Any, scanQueue: Collection<*>) {
-        // 读取虚拟设备配置
-        val devicesJson = try { prefs.getString("devices", "[]") ?: "[]" } catch (_: Throwable) { "[]" }
+        // 读取虚拟设备配置（优先 TCP 同步缓存，与 VirtualDeviceInjector 一致）
+        val synced = CaptureSocket.configCache
+        var devicesJson = if (synced.devicesJson != "[]" && synced.timestamp > 0L) {
+            synced.devicesJson
+        } else {
+            try { prefs.getString("devices", "[]") ?: "[]" } catch (_: Throwable) { "[]" }
+        }
         if (devicesJson == "[]") return
 
         val devices = try {

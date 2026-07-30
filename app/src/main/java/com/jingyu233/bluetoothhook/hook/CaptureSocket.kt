@@ -92,7 +92,7 @@ object CaptureSocket {
                 try { s?.close() } catch (_: Throwable) {}
                 Logger.Hook.d(TAG, "Attempting TCP connect to $HOST:${CaptureProtocol.PORT} ...")
                 s = Socket(HOST, CaptureProtocol.PORT)
-                s.soTimeout = 0 // 无超时：Reader 线程阻塞等待 App 推送配置更新
+                s.soTimeout = 5000 // 5s read timeout for initial config (reset to 0 after)
                 os = s.getOutputStream()
                 Logger.Hook.i(TAG, "TCP connected to $HOST:${CaptureProtocol.PORT}")
 

@@ -20,6 +20,7 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -85,7 +86,15 @@ object CaptureBridge {
 
     /** App 进程的 Application Context，由 BluetoothHookApplication.onCreate 设置 */
     @Volatile
-    var _appContext: android.content.Context? = null
+    private var _appContext: android.content.Context? = null
+
+    /** 设置 App Context（替代直接字段访问） */
+    fun setAppContext(context: android.content.Context) {
+        _appContext = context.applicationContext
+    }
+
+    /** startServer 原子性保护，防止并发启动 */
+    private val isStarting = AtomicBoolean(false)
 
     /** 自增记录 ID */
     private val nextRecordId = AtomicLong(1L)
@@ -95,6 +104,9 @@ object CaptureBridge {
 
     /** 防抖 emit 标志 */
     private val isEmitPending = AtomicBoolean(false)
+
+    /** 已连接客户端的 OutputStream 列表（线程安全），用于配置热推送 */
+    private val connectedClients = CopyOnWriteArrayList<OutputStream>()
 
     // -------------------- 公开 API --------------------
 
@@ -107,7 +119,12 @@ object CaptureBridge {
      * 幂等：已在监听时直接返回。
      */
     fun startServer() {
+        if (!isStarting.compareAndSet(false, true)) {
+            Logger.App.w(TAG, "startServer called but already starting, ignored")
+            return
+        }
         if (_isListening.value) {
+            isStarting.set(false)
             Logger.App.w(TAG, "startServer called but already listening, ignored")
             return
         }
@@ -161,9 +178,10 @@ object CaptureBridge {
 
                         // 鉴权通过 → 先推送配置行，再处理 STATUS/CAP 行
                         launch {
+                            var clientOs: OutputStream? = null
                             try {
                                 // 推送当前配置给客户端（绕过 XSharedPreferences）
-                                pushConfigToClient(client)
+                                clientOs = pushConfigToClient(client)
 
                                 var line: String? = null
                                 while (isActive && reader.readLine().also { line = it } != null) {
@@ -175,6 +193,8 @@ object CaptureBridge {
                             } catch (e: Exception) {
                                 Logger.App.e(TAG, "Client handler error", e)
                             } finally {
+                                clientOs?.let { connectedClients.remove(it) }
+                                try { reader.close() } catch (_: Exception) {}
                                 try { client.close() } catch (_: Exception) {}
                             }
                         }
@@ -196,6 +216,7 @@ object CaptureBridge {
                 serverSocket?.close()
                 serverSocket = null
                 _isListening.value = false
+                isStarting.set(false)
                 Logger.App.i(TAG, "Capture server stopped")
             }
         }
@@ -245,39 +266,77 @@ object CaptureBridge {
      * 客户端（CaptureSocket）解析后缓存到 configCache，
      * 完全绕过 XSharedPreferences 的 SELinux 跨进程读取问题。
      */
-    private fun pushConfigToClient(client: Socket) {
+    private fun pushConfigToClient(client: Socket): OutputStream? {
         try {
             val os: OutputStream = client.getOutputStream()
             val appContext = _appContext ?: run {
                 Logger.App.w(TAG, "pushConfigToClient: appContext not set, skipping config push")
-                return
+                return null
             }
             val configBridge = ConfigBridge(appContext)
 
-            // global_enabled
-            val globalEnabled = configBridge.getGlobalEnabled()
-            os.write("CFG|global_enabled|$globalEnabled\n".toByteArray(Charsets.UTF_8))
+            writeConfigLines(os, configBridge)
 
-            // capture_enabled
-            val captureEnabled = configBridge.isCaptureEnabled()
-            os.write("CFG|capture_enabled|$captureEnabled\n".toByteArray(Charsets.UTF_8))
+            // 注册到已连接客户端列表，以便后续热推送
+            connectedClients.add(os)
 
-            // devices JSON
             val devicesJson = configBridge.getDevicesJson()
-            os.write("CFG|devices|$devicesJson\n".toByteArray(Charsets.UTF_8))
-
-            // classic_interval
-            val classicIntervalMs = configBridge.getClassicIntervalMs()
-            os.write("CFG|classic_interval|$classicIntervalMs\n".toByteArray(Charsets.UTF_8))
-
-            // 终止标记
-            os.write("CFG|END\n".toByteArray(Charsets.UTF_8))
-            os.flush()
-
-            Logger.App.d(TAG, "Config pushed to client: global=$globalEnabled, capture=$captureEnabled, devices=${if (devicesJson == "[]") "none" else "present"}")
+            Logger.App.d(TAG, "Config pushed to client: global=${configBridge.getGlobalEnabled()}, capture=${configBridge.isCaptureEnabled()}, devices=${if (devicesJson == "[]") "none" else "present"}")
+            return os
         } catch (e: Exception) {
             Logger.App.e(TAG, "Failed to push config to client", e)
+            return null
         }
+    }
+
+    /**
+     * 向所有已连接的 Hook 客户端推送最新配置。
+     * 在设备列表或开关状态变更时调用，确保 Hook 进程实时获取最新配置。
+     */
+    fun pushConfigUpdate() {
+        if (connectedClients.isEmpty()) return
+        val appContext = _appContext ?: return
+        val configBridge = ConfigBridge(appContext)
+
+        // 在 IO 线程执行，避免阻塞 UI
+        scope.launch {
+            val deadClients = mutableListOf<OutputStream>()
+            for (os in connectedClients) {
+                try {
+                    writeConfigLines(os, configBridge)
+                    os.flush()
+                } catch (e: Exception) {
+                    Logger.App.d(TAG, "Client push failed, marking as dead: ${e.message}")
+                    deadClients.add(os)
+                }
+            }
+            // 清理已断开的客户端
+            connectedClients.removeAll(deadClients.toSet())
+            if (deadClients.isNotEmpty()) {
+                Logger.App.d(TAG, "Removed ${deadClients.size} dead client(s), ${connectedClients.size} remaining")
+            }
+        }
+    }
+
+    /**
+     * 将配置行写入 OutputStream。
+     * 格式：CFG|key|value，以 CFG|END 结尾。
+     */
+    private fun writeConfigLines(os: OutputStream, configBridge: ConfigBridge) {
+        val globalEnabled = configBridge.getGlobalEnabled()
+        os.write("CFG|global_enabled|$globalEnabled\n".toByteArray(Charsets.UTF_8))
+
+        val captureEnabled = configBridge.isCaptureEnabled()
+        os.write("CFG|capture_enabled|$captureEnabled\n".toByteArray(Charsets.UTF_8))
+
+        val devicesJson = configBridge.getDevicesJson()
+        os.write("CFG|devices|$devicesJson\n".toByteArray(Charsets.UTF_8))
+
+        val classicIntervalMs = configBridge.getClassicIntervalMs()
+        os.write("CFG|classic_interval|$classicIntervalMs\n".toByteArray(Charsets.UTF_8))
+
+        os.write("CFG|END\n".toByteArray(Charsets.UTF_8))
+        os.flush()
     }
 
     private fun parseStatus(line: String) {
@@ -330,10 +389,11 @@ object CaptureBridge {
         if (isEmitPending.getAndSet(true)) return
         scope.launch {
             delay(300L)
+            // 先释放标志，再发射数据：这样在发射期间到达的新记录可以启动新的 emit
+            isEmitPending.set(false)
             synchronized(recordsCache) {
                 _captureRecords.value = recordsCache.toList()
             }
-            isEmitPending.set(false)
         }
     }
 }

@@ -1,9 +1,9 @@
 package com.jingyu233.bluetoothhook.ui.screen
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -12,12 +12,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.jingyu233.bluetoothhook.data.model.BleAdConstants
 import com.jingyu233.bluetoothhook.data.model.CaptureRecord
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -85,6 +87,8 @@ fun CaptureDetailScreen(
                     DetailRow("MAC 地址", record.mac)
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                     DetailRow("RSSI", "${record.rssi} dBm")
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    DetailRow("距离", BleAdConstants.distanceDescription(record.rssi))
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                     DetailRow("事件类型", "0x${record.eventType.toString(16).uppercase()} (${record.eventTypeLabel})")
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
@@ -155,15 +159,35 @@ fun CaptureDetailScreen(
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Box(modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                    Text(
-                        text = record.advDataHex,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        lineHeight = 16.sp,
-                        modifier = Modifier.padding(12.dp)
-                    )
+                Row(modifier = Modifier.horizontalScroll(rememberScrollState()).padding(8.dp)) {
+                    if (adStructures.isEmpty()) {
+                        Text(
+                            text = record.advDataHex,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(4.dp)
+                        )
+                    } else {
+                        adStructures.forEach { ad ->
+                            val bgColor = adCategoryColor(ad.colorCategory)
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = bgColor.copy(alpha = 0.12f)
+                            ) {
+                                Text(
+                                    text = ad.fullHex,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    color = bgColor,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
+                    }
                 }
             }
         }
@@ -187,32 +211,55 @@ private fun DetailRow(label: String, value: String) {
     }
 }
 
+/** AD 类别 → 颜色 */
+private fun adCategoryColor(cat: Int): Color = when (cat) {
+    1 -> Color(0xFF1565C0) // UUID → blue
+    2 -> Color(0xFF2E7D32) // Name → green
+    3 -> Color(0xFFE65100) // Tx Power → orange
+    4 -> Color(0xFF6A1B9A) // Flags → purple
+    5 -> Color(0xFFAD1457) // Appearance → pink
+    6 -> Color(0xFFC62828) // Manufacturer → red
+    7 -> Color(0xFF00838F) // Service Data → cyan
+    else -> Color(0xFF616161) // other → gray
+}
+
 /**
  * AD (Advertisement Data) 结构卡片
  */
 @Composable
 private fun AdStructureCard(index: Int, ad: AdStructure) {
+    val catColor = adCategoryColor(ad.colorCategory)
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
         )
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
+            // ── 标题行 ──
             Row(modifier = Modifier.fillMaxWidth()) {
                 Surface(
                     shape = MaterialTheme.shapes.extraSmall,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                    color = catColor.copy(alpha = 0.2f)
                 ) {
                     Text(
                         text = "#$index",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = catColor,
+                        fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "0x${ad.typeHex} — ${ad.typeName}",
+                    text = ad.typeHex,
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = catColor,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = ad.typeName,
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f)
@@ -223,15 +270,51 @@ private fun AdStructureCard(index: Int, ad: AdStructure) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+
+            // ── 解析详情 ──
+            if (ad.details.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                HorizontalDivider(
+                    color = catColor.copy(alpha = 0.2f),
+                    thickness = 1.dp
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                ad.details.forEach { (label, value) ->
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.width(96.dp)
+                        )
+                        Text(
+                            text = value,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium,
+                            fontFamily = if (value.startsWith("0x") || value.contains("-"))
+                                FontFamily.Monospace else FontFamily.Default,
+                            fontSize = if (value.length > 32) 10.sp else 13.sp
+                        )
+                    }
+                }
+            }
+
+            // ── Hex 数据（着色） ──
             Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = ad.dataHex,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
-                lineHeight = 15.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Surface(
+                shape = MaterialTheme.shapes.extraSmall,
+                color = catColor.copy(alpha = 0.08f)
+            ) {
+                Text(
+                    text = ad.dataHex,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    color = catColor,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
         }
     }
 }
@@ -242,7 +325,15 @@ data class AdStructure(
     val typeHex: String,
     val typeName: String,
     val dataLen: Int,
-    val dataHex: String
+    val dataHex: String,
+    /** 完整段 hex（含长度 + 类型 + 数据） */
+    val fullHex: String = "",
+    /** AD 字节在原始数据中的起始偏移 */
+    val offset: Int = 0,
+    /** 解析后的键值对详情 */
+    val details: List<Pair<String, String>> = emptyList(),
+    /** 颜色分类 (0=gray, 1=blue/UUID, 2=green/name, 3=orange/tx, 4=purple/flags, 5=pink/appearance, 6=red/manuf, 7=cyan/service) */
+    val colorCategory: Int = 0
 )
 
 /**
@@ -261,19 +352,124 @@ private fun parseAdStructures(hex: String): List<AdStructure> {
         if (len < 1) { i++; continue }            // 异常长度
         val type = bytes[i + 1].toInt() and 0xFF
         val dataBytes = if (len > 1) bytes.sliceArray(i + 2..i + len) else byteArrayOf()
+        val dataHex = dataBytes.joinToString("") { b ->
+            String.format("%02X", b.toInt() and 0xFF)
+        }
+        val fullHex = bytes.sliceArray(i..(i + len))
+            .joinToString("") { String.format("%02X", it.toInt() and 0xFF) }
+        val offset = i
+        val details = mutableListOf<Pair<String, String>>()
+        val colorCategory = adColorCategory(type)
+
+        // 按 AD Type 解析详情
+        when (type) {
+            0x01 -> { // Flags
+                if (dataBytes.isNotEmpty()) {
+                    val flags = BleAdConstants.parseFlags(dataBytes[0].toInt() and 0xFF)
+                    flags.forEach { details.add("Flag" to it) }
+                }
+            }
+            0x02, 0x03 -> { // 16-bit UUIDs
+                val list = BleAdConstants.parseUuid16List(dataBytes, type == 0x03)
+                list.forEach { (name, uuid) ->
+                    if (name == "Unknown") {
+                        details.add("UUID" to uuid)
+                    } else {
+                        details.add(uuid to name)
+                    }
+                }
+            }
+            0x04, 0x05 -> { // 32-bit UUIDs
+                val list = BleAdConstants.parseUuid32List(dataBytes)
+                list.forEach { details.add("UUID" to it) }
+            }
+            0x06, 0x07 -> { // 128-bit UUIDs
+                val list = BleAdConstants.parseUuid128List(dataBytes)
+                list.forEach { details.add("UUID" to it) }
+            }
+            0x08, 0x09 -> { // Local Name
+                val name = dataBytes.joinToString("") { c ->
+                    val v = c.toInt() and 0xFF
+                    if (v in 0x20..0x7E) v.toChar().toString() else "?"
+                }
+                details.add("名称" to name)
+            }
+            0x0A -> { // Tx Power Level
+                if (dataBytes.isNotEmpty()) {
+                    val txPower = dataBytes[0].toInt() // already signed byte
+                    details.add("Tx Power" to "$txPower dBm")
+                }
+            }
+            0x16 -> { // Service Data (16-bit UUID)
+                if (dataBytes.size >= 2) {
+                    val uuid = (dataBytes[0].toInt() and 0xFF) or
+                               ((dataBytes[1].toInt() and 0xFF) shl 8)
+                    val name = BleAdConstants.uuid16Name(uuid) ?: "Unknown"
+                    val uuidStr = "0x${uuid.toString(16).uppercase().padStart(4, '0')}"
+                    details.add("Service" to "$name ($uuidStr)")
+                    if (dataBytes.size > 2) {
+                        val extra = dataBytes.sliceArray(2..dataBytes.lastIndex)
+                            .joinToString("") { "%02X".format(it.toInt() and 0xFF) }
+                        details.add("数据" to extra)
+                    }
+                }
+            }
+            0x19 -> { // Appearance
+                if (dataBytes.size >= 2) {
+                    val value = (dataBytes[0].toInt() and 0xFF) or
+                                ((dataBytes[1].toInt() and 0xFF) shl 8)
+                    details.add("外观" to BleAdConstants.parseAppearance(value))
+                }
+            }
+            0xFF -> { // Manufacturer Specific Data
+                val manuf = BleAdConstants.parseManufacturerId(dataBytes)
+                if (manuf != null) {
+                    val (id, name) = manuf
+                    details.add("制造商" to "$name (0x${id.toString(16).uppercase().padStart(4, '0')})")
+                    // 检测 iBeacon
+                    val ibeacon = BleAdConstants.parseIBeacon(dataBytes)
+                    if (ibeacon != null) {
+                        details.add("iBeacon" to "✓")
+                        details.add("Proximity UUID" to ibeacon.proximityUuid)
+                        details.add("Major" to ibeacon.major.toString())
+                        details.add("Minor" to ibeacon.minor.toString())
+                        details.add("参考 RSSI" to "${ibeacon.txPower} dBm")
+                    } else if (dataBytes.size > 2) {
+                        val extra = dataBytes.sliceArray(2..dataBytes.lastIndex)
+                            .joinToString("") { "%02X".format(it.toInt() and 0xFF) }
+                        details.add("自定义数据" to extra)
+                    }
+                }
+            }
+        }
+
         result.add(
             AdStructure(
                 typeHex = "0x${type.toString(16).uppercase().padStart(2, '0')}",
                 typeName = adTypeName(type),
                 dataLen = dataBytes.size,
-                dataHex = dataBytes.joinToString("") { b ->
-                    String.format("%02X", b.toInt() and 0xFF)
-                }
+                dataHex = dataHex,
+                fullHex = fullHex,
+                offset = offset,
+                details = details,
+                colorCategory = colorCategory
             )
         )
         i += len + 1
     }
     return result
+}
+
+/** AD Type → 颜色分类 */
+private fun adColorCategory(type: Int): Int = when (type) {
+    0x01 -> 4  // Flags → purple
+    0x02, 0x03, 0x04, 0x05, 0x06, 0x07 -> 1  // UUIDs → blue
+    0x08, 0x09 -> 2  // Local Name → green
+    0x0A -> 3  // Tx Power → orange
+    0x16, 0x1E, 0x1F -> 7  // Service Data → cyan
+    0x19 -> 5  // Appearance → pink
+    0xFF -> 6  // Manufacturer → red
+    else -> 0  // other → gray
 }
 
 /**

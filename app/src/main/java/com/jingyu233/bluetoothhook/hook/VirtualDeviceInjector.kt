@@ -6,6 +6,8 @@ import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedHelpers
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.JsonElement
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -25,6 +27,8 @@ class VirtualDeviceInjector(
     }
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    private val fallbackJson = Json { ignoreUnknownKeys = true }
 
     // 上次注入时间戳，用于控制注入频率
     private val lastInjectTime = ConcurrentHashMap<String, Long>()
@@ -98,6 +102,23 @@ class VirtualDeviceInjector(
             }
         } catch (_: Throwable) { }
 
+        // 3) fallback: 文件回退（/data/local/tmp/bthook_config.json）
+        try {
+            val fallbackFile = File("/data/local/tmp/bthook_config.json")
+            if (fallbackFile.exists()) {
+                val text = fallbackFile.readText()
+                val obj = fallbackJson.decodeFromString<Map<String, JsonElement>>(text)
+                val devicesStr = obj["devices"]?.toString()
+                if (devicesStr != null && devicesStr != "[]" && devicesStr != "\"[]\"") {
+                    // JsonElement.toString() 会加引号包裹字符串值，需要处理
+                    val cleaned = if (devicesStr.startsWith("\"") && devicesStr.endsWith("\"")) {
+                        devicesStr.substring(1, devicesStr.length - 1).replace("\\\"", "\"")
+                    } else devicesStr
+                    if (cleaned != "[]") return cleaned
+                }
+            }
+        } catch (_: Throwable) { }
+
         return "[]"
     }
 
@@ -109,16 +130,6 @@ class VirtualDeviceInjector(
         scanQueue: Collection<*>,
         scannerMap: Any
     ) {
-        // 检查注入频率限制
-        val now = System.currentTimeMillis()
-        val lastTime = lastInjectTime[device.id] ?: 0L
-        if (now - lastTime < device.intervalMs) {
-            return // 还没到注入间隔
-        }
-
-        // 更新注入时间
-        lastInjectTime[device.id] = now
-
         // 验证设备参数
         if (!scanResultBuilder.isValidMacAddress(device.mac)) {
             Logger.Hook.w(TAG, "Invalid MAC address for device ${device.name}: ${device.mac}")
@@ -129,6 +140,14 @@ class VirtualDeviceInjector(
             Logger.Hook.w(TAG, "Invalid RSSI for device ${device.name}: ${device.rssi}")
             return
         }
+
+        // 检查注入频率限制（原子操作）
+        val now = System.currentTimeMillis()
+        val shouldInject = lastInjectTime.compute(device.id) { _, lastTime ->
+            val last = lastTime ?: 0L
+            if (now - last < device.intervalMs) last else now
+        } == now
+        if (!shouldInject) return
 
         // 构造ScanResult
         val scanResult = scanResultBuilder.buildScanResult(
@@ -167,34 +186,28 @@ class VirtualDeviceInjector(
         scannerMap: Any,
         scanResult: Any
     ) {
-        try {
-            // 获取 scannerId（不同 ROM 字段名不同）
-            val scannerId = tryGetIntField(scanClient, "scannerId")
-                ?: tryGetIntField(scanClient, "mScannerId")
-                ?: run {
-                    Logger.Hook.d(TAG, "Failed to get scannerId from ScanClient: ${scanClient.javaClass.name}")
-                    return
-                }
+        // 获取 scannerId（不同 ROM 字段名不同）
+        val scannerId = tryGetIntField(scanClient, "scannerId")
+            ?: tryGetIntField(scanClient, "mScannerId")
+            ?: run {
+                Logger.Hook.d(TAG, "Failed to get scannerId from ScanClient: ${scanClient.javaClass.name}")
+                return
+            }
 
-            // 通过 scannerMap 获取 ScannerApp
-            val scannerApp = XposedHelpers.callMethod(scannerMap, "getById", scannerId)
-                ?: return
+        // 通过 scannerMap 获取 ScannerApp
+        val scannerApp = XposedHelpers.callMethod(scannerMap, "getById", scannerId)
+            ?: return
 
-            // 获取 IScannerCallback（不同 ROM 字段名不同）
-            val callback = tryGetObjectField(scannerApp, "callback")
-                ?: tryGetObjectField(scannerApp, "mCallback")
-                ?: run {
-                    Logger.Hook.d(TAG, "No callback found on scannerApp, skipping client $scannerId")
-                    return
-                }
+        // 获取 IScannerCallback（不同 ROM 字段名不同）
+        val callback = tryGetObjectField(scannerApp, "callback")
+            ?: tryGetObjectField(scannerApp, "mCallback")
+            ?: run {
+                Logger.Hook.d(TAG, "No callback found on scannerApp, skipping client $scannerId")
+                return
+            }
 
-            // 调用 callback.onScanResult(scanResult)
-            XposedHelpers.callMethod(callback, "onScanResult", scanResult)
-
-        } catch (e: Throwable) {
-            // 某些客户端可能已断开连接，抛出异常让上层处理
-            throw e
-        }
+        // 调用 callback.onScanResult(scanResult)
+        XposedHelpers.callMethod(callback, "onScanResult", scanResult)
     }
 
     /** 安全获取 int 字段，不存在时返回 null */

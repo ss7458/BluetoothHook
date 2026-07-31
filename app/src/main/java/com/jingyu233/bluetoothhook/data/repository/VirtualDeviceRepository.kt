@@ -18,8 +18,9 @@ import kotlinx.coroutines.withContext
  */
 class VirtualDeviceRepository(
     private val deviceDao: VirtualDeviceDao,
-    private val context: Context
+    context: Context
 ) {
+    private val context = context.applicationContext
 
     companion object {
         private val TAG = Logger.Tags.DATA_REPOSITORY

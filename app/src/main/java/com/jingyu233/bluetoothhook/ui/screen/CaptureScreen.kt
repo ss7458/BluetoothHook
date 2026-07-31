@@ -85,7 +85,7 @@ fun CaptureScreen(
         contract = ActivityResultContracts.CreateDocument("text/csv")
     ) { uri ->
         if (uri != null) {
-            viewModel.exportTo(uri, context)
+            viewModel.exportTo(uri)
         }
     }
 
@@ -318,10 +318,13 @@ fun CaptureScreen(
                         }
                     }
 
-                    // 自动滚动到最新
+                    // 自动滚动到最新（仅当用户在底部附近时）
                     LaunchedEffect(records.size) {
                         if (records.isNotEmpty()) {
-                            listState.animateScrollToItem(records.size - 1)
+                            val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                            if (lastVisibleItem >= records.size - 2) {
+                                listState.animateScrollToItem(records.size - 1)
+                            }
                         }
                     }
                 }

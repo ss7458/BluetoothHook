@@ -20,7 +20,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 /**
  * 重启蓝牙命令卡片 - 一键复制 adb shell 命令到剪贴板
@@ -31,8 +30,6 @@ fun RestartBluetoothCard(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
     var copied by remember { mutableStateOf(false) }
     val command = "adb shell am force-stop com.android.bluetooth"
 
@@ -106,13 +103,6 @@ fun RestartBluetoothCard(
                             ClipData.newPlainText("restart_bt", command)
                         )
                         copied = true
-                        scope.launch {
-                            snackbarHostState.currentSnackbarData?.dismiss()
-                            snackbarHostState.showSnackbar(
-                                "已复制",
-                                duration = SnackbarDuration.Short
-                            )
-                        }
                     }
                 ) {
                     Icon(

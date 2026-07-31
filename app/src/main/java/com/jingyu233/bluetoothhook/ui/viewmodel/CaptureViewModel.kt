@@ -1,7 +1,6 @@
 package com.jingyu233.bluetoothhook.ui.viewmodel
 
 import android.app.Application
-import android.content.Context
 import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
@@ -52,20 +51,25 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     val bleScanning: StateFlow<Boolean> = _bleScanning.asStateFlow()
 
     // ── 过滤 ────────────────────────────────────────────────
-    val rssiMinFilter = MutableStateFlow<Int?>(null)
-    val rssiMaxFilter = MutableStateFlow<Int?>(null)
-    val macFilterPattern = MutableStateFlow("")
+    private val _rssiMinFilter = MutableStateFlow<Int?>(null)
+    val rssiMinFilter = _rssiMinFilter.asStateFlow()
+
+    private val _rssiMaxFilter = MutableStateFlow<Int?>(null)
+    val rssiMaxFilter = _rssiMaxFilter.asStateFlow()
+
+    private val _macFilterPattern = MutableStateFlow("")
+    val macFilterPattern = _macFilterPattern.asStateFlow()
 
     /** 是否有激活的过滤条件 */
     val hasActiveFilter: StateFlow<Boolean> = combine(
-        rssiMinFilter, rssiMaxFilter, macFilterPattern
+        _rssiMinFilter, _rssiMaxFilter, _macFilterPattern
     ) { min, max, mac ->
         min != null || max != null || mac.isNotBlank()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     /** 经过过滤后的记录列表 */
     val filteredRecords: StateFlow<List<CaptureRecord>> = combine(
-        captureRecords, rssiMinFilter, rssiMaxFilter, macFilterPattern
+        captureRecords, _rssiMinFilter, _rssiMaxFilter, _macFilterPattern
     ) { records, min, max, mac ->
         records.filter { rec ->
             (min == null || rec.rssi >= min) &&
@@ -84,13 +88,13 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun setRssiMinFilter(value: Int?) { rssiMinFilter.value = value }
-    fun setRssiMaxFilter(value: Int?) { rssiMaxFilter.value = value }
-    fun setMacFilterPattern(value: String) { macFilterPattern.value = value }
+    fun setRssiMinFilter(value: Int?) { _rssiMinFilter.value = value }
+    fun setRssiMaxFilter(value: Int?) { _rssiMaxFilter.value = value }
+    fun setMacFilterPattern(value: String) { _macFilterPattern.value = value }
     fun clearFilters() {
-        rssiMinFilter.value = null
-        rssiMaxFilter.value = null
-        macFilterPattern.value = ""
+        _rssiMinFilter.value = null
+        _rssiMaxFilter.value = null
+        _macFilterPattern.value = ""
     }
 
     /** 简单的 MAC 通配符匹配：?=单字符, *=多字符 */
@@ -102,7 +106,7 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
             .replace(":", "\\:")
         return try {
             mac.matches(Regex(regex, RegexOption.IGNORE_CASE))
-        } catch (_: Exception) { true }
+        } catch (_: Exception) { false }
     }
 
     fun setCaptureEnabled(enabled: Boolean) {
@@ -135,12 +139,12 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     fun clear() = CaptureBridge.clearRecords()
 
     /** 导出抓包记录为 CSV 文件 */
-    fun exportTo(uri: Uri, context: Context) {
+    fun exportTo(uri: Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 // 快照当前记录列表以确保线程安全
                 val records = captureRecords.value.toList()
-                context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                getApplication<Application>().contentResolver.openOutputStream(uri)?.use { outputStream ->
                     outputStream.bufferedWriter().use { writer ->
                         // 写入 CSV 表头
                         writer.write("timestamp,mac,rssi,eventType,primaryPhy,addressType,advDataHex")

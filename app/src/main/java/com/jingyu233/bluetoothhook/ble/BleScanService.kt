@@ -34,7 +34,7 @@ class BleScanService : Service() {
         private val TAG = Logger.Tags.SERVICE
 
         private const val CHANNEL_ID = "ble_scan_channel"
-        private const val NOTIFICATION_ID = 1001
+        private const val NOTIFICATION_ID = 1002
         private const val ACTION_START = "com.jingyu233.bluetoothhook.ble.START_SCAN"
         private const val ACTION_STOP = "com.jingyu233.bluetoothhook.ble.STOP_SCAN"
 
@@ -50,7 +50,11 @@ class BleScanService : Service() {
             val intent = Intent(context, BleScanService::class.java).apply {
                 action = ACTION_START
             }
-            context.startForegroundService(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
         }
 
         fun stop(context: Context) {
@@ -70,7 +74,7 @@ class BleScanService : Service() {
         }
 
         override fun onScanFailed(errorCode: Int) {
-            Logger.Hook.e(TAG, "BLE scan failed with error code: $errorCode")
+            Logger.App.e(TAG, "BLE scan failed with error code: $errorCode")
             _isRunning = false
             sendStateChanged()
             stopSelf()
@@ -82,10 +86,11 @@ class BleScanService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        Logger.Hook.i(TAG, "BleScanService created")
+        Logger.App.i(TAG, "BleScanService created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForeground(NOTIFICATION_ID, buildNotification())
         when (intent?.action) {
             ACTION_START -> startBleScan()
             ACTION_STOP -> stopBleScan()
@@ -102,14 +107,14 @@ class BleScanService : Service() {
             val bluetoothAdapter = bluetoothManager?.adapter
 
             if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
-                Logger.Hook.w(TAG, "Bluetooth adapter not available or disabled")
+                Logger.App.w(TAG, "Bluetooth adapter not available or disabled")
                 stopSelf()
                 return
             }
 
             bluetoothLeScanner = bluetoothAdapter.bluetoothLeScanner
             if (bluetoothLeScanner == null) {
-                Logger.Hook.w(TAG, "BluetoothLeScanner not available")
+                Logger.App.w(TAG, "BluetoothLeScanner not available")
                 stopSelf()
                 return
             }
@@ -123,16 +128,15 @@ class BleScanService : Service() {
             bluetoothLeScanner?.startScan(null, settings, scanCallback)
 
             _isRunning = true
-            startForeground(NOTIFICATION_ID, buildNotification())
             sendStateChanged()
 
-            Logger.Hook.i(TAG, "BLE scan started (placeholder session for virtual device injection)")
+            Logger.App.i(TAG, "BLE scan started (placeholder session for virtual device injection)")
 
         } catch (e: SecurityException) {
-            Logger.Hook.e(TAG, "BLE scan permission denied", e)
+            Logger.App.e(TAG, "BLE scan permission denied", e)
             stopSelf()
         } catch (e: Exception) {
-            Logger.Hook.e(TAG, "Failed to start BLE scan", e)
+            Logger.App.e(TAG, "Failed to start BLE scan", e)
             stopSelf()
         }
     }
@@ -142,9 +146,9 @@ class BleScanService : Service() {
 
         try {
             bluetoothLeScanner?.stopScan(scanCallback)
-            Logger.Hook.i(TAG, "BLE scan stopped")
+            Logger.App.i(TAG, "BLE scan stopped")
         } catch (e: Exception) {
-            Logger.Hook.w(TAG, "Error stopping scan: ${e.message}")
+            Logger.App.w(TAG, "Error stopping scan: ${e.message}")
         }
 
         _isRunning = false
@@ -162,15 +166,17 @@ class BleScanService : Service() {
     }
 
     private fun createNotificationChannel() {
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            "BLE扫描服务",
-            NotificationManager.IMPORTANCE_LOW
-        ).apply {
-            description = "保持BLE扫描运行以支持虚拟设备注入"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "BLE扫描服务",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "保持BLE扫描运行以支持虚拟设备注入"
+            }
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.createNotificationChannel(channel)
         }
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(channel)
     }
 
     private fun buildNotification(): Notification {

@@ -50,7 +50,7 @@ abstract class VirtualDeviceDatabase : RoomDatabase() {
                     "bluetooth_hook.db"
                 )
                     .addMigrations(MIGRATION_1_2)  // 添加迁移
-                    .fallbackToDestructiveMigration()
+                    .fallbackToDestructiveMigrationOnDowngrade()  // 仅降级时销毁数据
                     .build()
 
                 INSTANCE = instance

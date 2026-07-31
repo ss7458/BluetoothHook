@@ -1,6 +1,8 @@
 package com.jingyu233.bluetoothhook.ui.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -90,7 +92,8 @@ fun BluetoothHookNavigation() {
             arguments = listOf(navArgument("recordId") { type = NavType.LongType })
         ) { backStackEntry ->
             val recordId = backStackEntry.arguments?.getLong("recordId") ?: -1L
-            val record = CaptureBridge.captureRecords.value.find { it.id == recordId }
+            val captureRecords by CaptureBridge.captureRecords.collectAsState()
+            val record = captureRecords.find { it.id == recordId }
             CaptureDetailScreen(
                 record = record,
                 onNavigateBack = { navController.popBackStack() }

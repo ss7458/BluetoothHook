@@ -133,7 +133,11 @@ class SyncManager(
 
         val added = mergedIds - localIds
         val deleted = localIds - mergedIds
-        val updated = localIds.intersect(mergedIds)
+        val updated = localIds.intersect(mergedIds).count { id ->
+            val local = localDevices.find { it.id == id }
+            val merged = mergedDevices.find { it.id == id }
+            local != merged
+        }
 
         val conflicts = when (strategy) {
             ConflictStrategy.MERGE_BY_TIMESTAMP -> {
@@ -152,7 +156,7 @@ class SyncManager(
             remoteDevices = remoteDevices.size,
             mergedDevices = mergedDevices.size,
             added = added.size,
-            updated = updated.size,
+            updated = updated,
             deleted = deleted.size,
             conflicts = conflicts,
             strategy = strategy

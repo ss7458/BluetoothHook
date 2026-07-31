@@ -88,8 +88,7 @@ class HookEntry : IXposedHookLoadPackage {
                                 Logger.Hook.w(TAG, "thisObject is not a Context: ${app?.javaClass?.name}")
                                 return
                             }
-                            val context = app as android.content.Context
-                            val prefs = context.getSharedPreferences(
+                            val prefs = app.getSharedPreferences(
                                 "module_status",
                                 android.content.Context.MODE_PRIVATE
                             )

@@ -67,7 +67,9 @@ class AutoSyncService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + Job())
     private var syncJob: Job? = null
 
+    @Volatile
     private var syncCount = 0
+    @Volatile
     private var lastSyncTime = 0L
 
     override fun onCreate() {
@@ -83,15 +85,11 @@ class AutoSyncService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForeground(NOTIFICATION_ID, createNotification())
         when (intent?.action) {
             ACTION_START_SYNC -> {
                 Logger.App.i(TAG, "Starting auto-sync service")
-                startForeground(NOTIFICATION_ID, createNotification())
                 startSyncLoop()
-            }
-            ACTION_STOP_SYNC -> {
-                Logger.App.i(TAG, "Stopping auto-sync service")
-                stopSelf()
             }
         }
         return START_STICKY
@@ -103,6 +101,7 @@ class AutoSyncService : Service() {
         super.onDestroy()
         syncJob?.cancel()
         serviceScope.cancel()
+        stopForeground(true)
         Logger.App.d(TAG, "AutoSyncService destroyed, total syncs: $syncCount")
     }
 

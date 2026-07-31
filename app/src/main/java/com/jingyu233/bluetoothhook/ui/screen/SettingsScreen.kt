@@ -33,6 +33,7 @@ fun SettingsScreen(
     val settings by viewModel.settings.collectAsState()
     val deviceCount by viewModel.deviceCount.collectAsState()
     val isTestingConnection by viewModel.isTestingConnection.collectAsState()
+    val isSyncing by viewModel.isSyncing.collectAsState()
     val connectionTestResult by viewModel.connectionTestResult.collectAsState()
     val importExportStatus by viewModel.importExportStatus.collectAsState()
     val syncLogs by viewModel.syncLogs.collectAsState()
@@ -78,6 +79,7 @@ fun SettingsScreen(
                     WebDavSettingsCard(
                         settings = settings,
                         isTestingConnection = isTestingConnection,
+                        isSyncing = isSyncing,
                         connectionTestResult = connectionTestResult,
                         syncLogs = syncLogs,
                         onUrlChange = { viewModel.updateWebDavUrl(it) },
@@ -170,6 +172,7 @@ fun SettingsSection(
 fun WebDavSettingsCard(
     settings: com.jingyu233.bluetoothhook.data.model.AppSettings,
     isTestingConnection: Boolean,
+    isSyncing: Boolean,
     connectionTestResult: String?,
     syncLogs: List<com.jingyu233.bluetoothhook.data.model.SyncLog>,
     onUrlChange: (String) -> Unit,
@@ -278,7 +281,7 @@ fun WebDavSettingsCard(
                 OutlinedButton(
                     onClick = onTestConnection,
                     modifier = Modifier.weight(1f),
-                    enabled = !isTestingConnection
+                    enabled = !isTestingConnection && !isSyncing
                 ) {
                     if (isTestingConnection) {
                         CircularProgressIndicator(
@@ -293,9 +296,16 @@ fun WebDavSettingsCard(
                 Button(
                     onClick = onSyncNow,
                     modifier = Modifier.weight(1f),
-                    enabled = !isTestingConnection
+                    enabled = !isSyncing && !isTestingConnection
                 ) {
-                    Text("立即同步")
+                    if (isSyncing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text("立即同步")
+                    }
                 }
             }
 
@@ -336,6 +346,8 @@ fun WebDavSettingsCard(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
+                val dateFormat = remember { java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()) }
+
                 syncLogs.forEach { log ->
                     Card(
                         modifier = Modifier
@@ -359,8 +371,7 @@ fun WebDavSettingsCard(
                                     fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
                                 )
                                 Text(
-                                    text = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
-                                        .format(java.util.Date(log.timestamp)),
+                                    text = dateFormat.format(java.util.Date(log.timestamp)),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -453,7 +464,7 @@ fun ClassicIntervalCard(
 
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "设为 0 可关闭经典蓝牙发现广播。该广播使虚拟设备出现在系统蓝牙设置中。",
+                text = "该广播使虚拟设备出现在系统蓝牙设置中。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

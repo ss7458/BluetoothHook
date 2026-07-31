@@ -117,7 +117,6 @@ class DeviceEditorViewModel(
             }
         } else {
             // 切换到扩展广播模式，合并所有数据到advDataHex
-            val currentDevice = _device.value
             if (currentDevice.scanResponseHex.isNotEmpty()) {
                 // 合并扫描响应到广播数据
                 _device.value = currentDevice.copy(

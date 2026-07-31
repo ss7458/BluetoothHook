@@ -23,6 +23,8 @@ object BleScanManager {
 
     private val TAG = "BTHook:BleScan"
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var appContext: Context? = null
+    private val startScanRunnable = Runnable { appContext?.let { doStartScan(it) } }
 
     /** 空回调——我们只关心 scan session 被注册，不关心结果 */
     private val scanCallback = object : ScanCallback() {
@@ -37,6 +39,7 @@ object BleScanManager {
         override fun onScanFailed(errorCode: Int) {
             Log.e(TAG, "BLE scan failed with error code: $errorCode")
             isScanning = false
+            isStarting = false
         }
     }
 
@@ -46,21 +49,24 @@ object BleScanManager {
     var isScanning: Boolean = false
         private set
 
+    @Volatile
+    var isStarting: Boolean = false
+        private set
+
     /**
      * 启动BLE扫描（注册空 scan session）
      * 延迟500ms后执行，确保权限完全生效
      * @return true 如果成功启动，false 如果失败
      */
     fun startScan(context: Context): Boolean {
-        if (isScanning) return true
+        if (isScanning || isStarting) return true
+
+        isStarting = true
+        appContext = context.applicationContext
 
         // 在主线程延迟执行，确保权限已完全注册
-        mainHandler.postDelayed({
-            doStartScan(context.applicationContext)
-        }, 500)
+        mainHandler.postDelayed(startScanRunnable, 500)
 
-        // 先乐观返回true，实际结果由 doStartScan 设置
-        isScanning = true
         Log.i(TAG, "BLE scan start requested (delayed 500ms for permission settling)")
         return true
     }
@@ -71,6 +77,7 @@ object BleScanManager {
             if (bluetoothManager == null) {
                 Log.e(TAG, "BluetoothManager is null")
                 isScanning = false
+                isStarting = false
                 return
             }
 
@@ -78,12 +85,14 @@ object BleScanManager {
             if (bluetoothAdapter == null) {
                 Log.e(TAG, "BluetoothAdapter is null")
                 isScanning = false
+                isStarting = false
                 return
             }
 
             if (!bluetoothAdapter.isEnabled) {
                 Log.w(TAG, "Bluetooth is disabled")
                 isScanning = false
+                isStarting = false
                 return
             }
 
@@ -91,6 +100,7 @@ object BleScanManager {
             if (bluetoothLeScanner == null) {
                 Log.w(TAG, "BluetoothLeScanner is null")
                 isScanning = false
+                isStarting = false
                 return
             }
 
@@ -101,14 +111,17 @@ object BleScanManager {
             bluetoothLeScanner?.startScan(null, settings, scanCallback)
 
             isScanning = true
+            isStarting = false
             Log.i(TAG, "BLE scan started (placeholder session for virtual device injection)")
 
         } catch (e: SecurityException) {
             Log.e(TAG, "BLE scan permission denied", e)
             isScanning = false
+            isStarting = false
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start BLE scan: ${e.javaClass.simpleName}: ${e.message}", e)
             isScanning = false
+            isStarting = false
         }
     }
 
@@ -116,10 +129,10 @@ object BleScanManager {
      * 停止BLE扫描
      */
     fun stopScan() {
-        if (!isScanning) return
+        if (!isScanning && !isStarting) return
 
         try {
-            mainHandler.removeCallbacksAndMessages(null)
+            mainHandler.removeCallbacks(startScanRunnable)
             bluetoothLeScanner?.stopScan(scanCallback)
             Log.i(TAG, "BLE scan stopped")
         } catch (e: Exception) {
@@ -127,7 +140,9 @@ object BleScanManager {
         }
 
         isScanning = false
+        isStarting = false
         bluetoothLeScanner = null
+        appContext = null
     }
 
     /**

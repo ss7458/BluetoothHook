@@ -1,12 +1,12 @@
 package com.jingyu233.bluetoothhook.sync
 
 import com.jingyu233.bluetoothhook.data.model.VirtualDevice
+import com.jingyu233.bluetoothhook.util.DevicesPayload
 import com.jingyu233.bluetoothhook.utils.Logger
 import com.thegrizzlylabs.sardineandroid.DavResource
 import com.thegrizzlylabs.sardineandroid.impl.OkHttpSardine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
@@ -154,14 +154,3 @@ class WebDavClient(
         return "$cleanUrl/$fileName"
     }
 }
-
-/**
- * WebDAV 存储的数据载荷
- */
-@Serializable
-data class DevicesPayload(
-    val version: Int,
-    val exportedAt: Long,
-    val deviceCount: Int,
-    val devices: List<VirtualDevice>
-)

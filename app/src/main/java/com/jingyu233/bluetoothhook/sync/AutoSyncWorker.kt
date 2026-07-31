@@ -3,7 +3,6 @@ package com.jingyu233.bluetoothhook.sync
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.jingyu233.bluetoothhook.data.bridge.ConfigBridge
 import com.jingyu233.bluetoothhook.data.local.SettingsDataStore
 import com.jingyu233.bluetoothhook.data.local.VirtualDeviceDatabase
 import com.jingyu233.bluetoothhook.data.repository.VirtualDeviceRepository
@@ -59,11 +58,6 @@ class AutoSyncWorker(
             if (result.isSuccess) {
                 val report = result.getOrThrow()
                 Logger.App.i(TAG, "Auto sync completed: $report")
-
-                // 通知Hook进程更新
-                val configBridge = ConfigBridge(applicationContext)
-                val devices = repository.getAllDevicesSnapshot()
-                configBridge.writeDeviceConfig(devices)
 
                 Result.success()
             } else {

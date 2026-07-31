@@ -136,6 +136,7 @@ class SettingsDataStore(private val context: Context) {
      * 更新经典蓝牙发现广播间隔(毫秒)
      */
     suspend fun updateClassicInterval(ms: Int) {
+        require(ms > 0) { "Interval must be positive" }
         try {
             context.dataStore.edit { preferences ->
                 preferences[KEY_CLASSIC_INTERVAL_MS] = ms
@@ -150,6 +151,7 @@ class SettingsDataStore(private val context: Context) {
      * 更新同步间隔(秒)
      */
     suspend fun updateSyncInterval(seconds: Int) {
+        require(seconds > 0) { "Interval must be positive" }
         try {
             context.dataStore.edit { preferences ->
                 preferences[KEY_SYNC_INTERVAL_SECONDS] = seconds

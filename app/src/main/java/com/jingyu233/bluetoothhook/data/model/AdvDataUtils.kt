@@ -13,8 +13,14 @@ object AdvDataUtils {
      */
     fun splitAtAdBoundary(hex: String, maxAdvBytes: Int = 31): Pair<String, String> {
         if (hex.isEmpty()) return Pair("", "")
+        if (hex.length % 2 != 0) {
+            android.util.Log.w("AdvDataUtils", "Odd-length hex string, dropping last character: $hex")
+        }
         val bytes = hex.chunked(2).mapNotNull { chunk ->
-            if (chunk.length == 2) chunk.toInt(16) else null
+            if (chunk.length == 2) chunk.toInt(16) else {
+                android.util.Log.w("AdvDataUtils", "Odd-length hex string, dropping last character: $hex")
+                null
+            }
         }
         if (bytes.isEmpty()) return Pair("", "")
 

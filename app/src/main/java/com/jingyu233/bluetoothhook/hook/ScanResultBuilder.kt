@@ -134,8 +134,13 @@ class ScanResultBuilder(private val classLoader: ClassLoader) {
         val data = ByteArray(len / 2)
         var i = 0
         while (i < len) {
-            data[i / 2] = ((Character.digit(padded[i], 16) shl 4) +
-                    Character.digit(padded[i + 1], 16)).toByte()
+            val high = Character.digit(padded[i], 16)
+            val low = Character.digit(padded[i + 1], 16)
+            if (high == -1 || low == -1) {
+                android.util.Log.e("ScanResultBuilder", "Invalid hex character in: $this")
+                return ByteArray(0)
+            }
+            data[i / 2] = ((high shl 4) + low).toByte()
             i += 2
         }
         return data

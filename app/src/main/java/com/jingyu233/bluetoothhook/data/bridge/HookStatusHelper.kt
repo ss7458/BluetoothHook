@@ -23,7 +23,7 @@ object HookStatusHelper {
             val summary = when (activation) {
                 Activation.Active -> "Hook 已激活"
                 Activation.Inactive -> "Hook 未完全就绪"
-                Activation.Unknown -> "Hook 状态未知"
+                Activation.Unknown -> "Hook 状态未知"  // 此分支实际不可达：activation 只可能为 Active 或 Inactive
             }
             return Status(activation, summary, detail)
         }

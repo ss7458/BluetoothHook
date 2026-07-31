@@ -41,11 +41,8 @@ object JsonImportExport {
      */
     fun importFromJson(jsonString: String): Result<List<VirtualDevice>> {
         return try {
-            // 验证 JSON 结构
-            validateJsonStructure(jsonString).getOrThrow()
-
-            // 解析 JSON
-            val payload = json.decodeFromString<DevicesPayload>(jsonString)
+            // 验证并解析 JSON 结构
+            val payload = validateJsonStructure(jsonString).getOrThrow()
 
             // 验证版本
             if (payload.version > 1) {
@@ -79,18 +76,19 @@ object JsonImportExport {
     }
 
     /**
-     * 验证 JSON 字符串格式
+     * 验证 JSON 字符串格式并返回解析后的对象
+     * @return Result.success(DevicesPayload) 或 Result.failure(异常)
      */
-    fun validateJsonStructure(jsonString: String): Result<Unit> {
+    fun validateJsonStructure(jsonString: String): Result<DevicesPayload> {
         return try {
             if (jsonString.isBlank()) {
                 return Result.failure(IllegalArgumentException("JSON 内容为空"))
             }
 
-            // 尝试解析为 JSON 对象
-            json.decodeFromString<DevicesPayload>(jsonString)
+            // 解析为 DevicesPayload 对象
+            val payload = json.decodeFromString<DevicesPayload>(jsonString)
 
-            Result.success(Unit)
+            Result.success(payload)
         } catch (e: Exception) {
             Result.failure(IllegalArgumentException("无效的 JSON 格式: ${e.message}", e))
         }

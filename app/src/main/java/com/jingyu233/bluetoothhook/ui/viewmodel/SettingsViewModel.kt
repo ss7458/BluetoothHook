@@ -54,6 +54,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val _isTestingConnection = MutableStateFlow(false)
     val isTestingConnection: StateFlow<Boolean> = _isTestingConnection.asStateFlow()
 
+    private val _isSyncing = MutableStateFlow(false)
+    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
+
     private val _connectionTestResult = MutableStateFlow<String?>(null)
     val connectionTestResult: StateFlow<String?> = _connectionTestResult.asStateFlow()
 
@@ -71,8 +74,17 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         // 从DataStore加载设置
         viewModelScope.launch {
             settingsDataStore.settingsFlow.collect { settings ->
-                _settings.value = settings
-                Logger.App.d(TAG, "Loaded settings from DataStore")
+                // 只在值确实不同时才更新，避免覆盖乐观更新
+                if (_settings.value.webdavUrl != settings.webdavUrl ||
+                    _settings.value.webdavUsername != settings.webdavUsername ||
+                    _settings.value.webdavPassword != settings.webdavPassword ||
+                    _settings.value.captureEnabled != settings.captureEnabled ||
+                    _settings.value.autoSyncEnabled != settings.autoSyncEnabled ||
+                    _settings.value.syncIntervalSeconds != settings.syncIntervalSeconds ||
+                    _settings.value.classicIntervalMs != settings.classicIntervalMs) {
+                    _settings.value = settings
+                    Logger.App.d(TAG, "Loaded settings from DataStore")
+                }
             }
         }
     }
@@ -238,7 +250,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun syncNow(strategy: ConflictStrategy = ConflictStrategy.MERGE_BY_TIMESTAMP) {
-        _isTestingConnection.value = true
+        _isSyncing.value = true
         _connectionTestResult.value = "Syncing..."
 
         viewModelScope.launch {
@@ -279,7 +291,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 addSyncLog(false, "同步错误", errorMsg)
                 Logger.App.e(TAG, "Sync error", e)
             } finally {
-                _isTestingConnection.value = false
+                _isSyncing.value = false
             }
         }
     }
@@ -336,73 +348,68 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
      * 从 JSON 文件导入设备
      * @param uri 用户选择的文件 URI
      * @param replaceExisting 是否替换现有设备（true=替换，false=追加）
-     * @return 导入的设备数量
+     * 实际导入在协程中执行，结果通过 [importExportStatus] StateFlow 暴露。
      */
-    fun importDevices(uri: Uri?, replaceExisting: Boolean = false): Result<Int> {
+    fun importDevices(uri: Uri?, replaceExisting: Boolean = false) {
         if (uri == null) {
-            return Result.failure(IllegalArgumentException("未选择文件"))
+            _importExportStatus.value = "导入失败: 未选择文件"
+            return
         }
 
-        return try {
-            viewModelScope.launch {
-                try {
-                    // 读取文件内容
-                    val json = getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
-                        input.readBytes().toString(Charsets.UTF_8)
-                    } ?: throw IllegalStateException("无法读取文件")
+        viewModelScope.launch {
+            try {
+                // 读取文件内容
+                val json = getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
+                    input.readBytes().toString(Charsets.UTF_8)
+                } ?: throw IllegalStateException("无法读取文件")
 
-                    // 解析 JSON
-                    val importedDevices = JsonImportExport.importFromJson(json).getOrThrow()
+                // 解析 JSON
+                val importedDevices = JsonImportExport.importFromJson(json).getOrThrow()
 
-                    if (importedDevices.isEmpty()) {
-                        _importExportStatus.value = "文件中没有有效设备"
-                        return@launch
-                    }
-
-                    // 获取现有设备 ID 集合
-                    val existingIds = repository.getAllDevicesSnapshot().map { it.id }.toSet()
-
-                    // 处理 ID 冲突：为重复的 ID 生成新 UUID
-                    val devicesToImport = importedDevices.map { device ->
-                        if (device.id in existingIds) {
-                            Logger.App.d(TAG, "ID 冲突，为设备 ${device.name} 生成新 UUID")
-                            device.copy(
-                                id = UUID.randomUUID().toString(),
-                                createdAt = System.currentTimeMillis(),
-                                updatedAt = System.currentTimeMillis()
-                            )
-                        } else {
-                            device.copy(
-                                createdAt = System.currentTimeMillis(),
-                                updatedAt = System.currentTimeMillis()
-                            )
-                        }
-                    }
-
-                    // 导入设备
-                    if (replaceExisting) {
-                        repository.deleteAllDevices()
-                        Logger.App.w(TAG, "清空现有设备")
-                    }
-
-                    repository.addDevices(devicesToImport)
-                    repository.notifyHookProcess()
-
-                    _importExportStatus.value = "成功导入 ${devicesToImport.size} 个设备"
-                    Logger.App.i(TAG, "Imported ${devicesToImport.size} devices from $uri")
-
-                    // 刷新设备计数
-                    refreshDeviceCount()
-
-                } catch (e: Exception) {
-                    _importExportStatus.value = "导入失败: ${e.message}"
-                    Logger.App.e(TAG, "Import failed", e)
+                if (importedDevices.isEmpty()) {
+                    _importExportStatus.value = "文件中没有有效设备"
+                    return@launch
                 }
+
+                // 获取现有设备 ID 集合
+                val existingIds = repository.getAllDevicesSnapshot().map { it.id }.toSet()
+
+                // 处理 ID 冲突：为重复的 ID 生成新 UUID
+                val devicesToImport = importedDevices.map { device ->
+                    if (device.id in existingIds) {
+                        Logger.App.d(TAG, "ID 冲突，为设备 ${device.name} 生成新 UUID")
+                        device.copy(
+                            id = UUID.randomUUID().toString(),
+                            createdAt = System.currentTimeMillis(),
+                            updatedAt = System.currentTimeMillis()
+                        )
+                    } else {
+                        device.copy(
+                            createdAt = System.currentTimeMillis(),
+                            updatedAt = System.currentTimeMillis()
+                        )
+                    }
+                }
+
+                // 导入设备
+                if (replaceExisting) {
+                    repository.deleteAllDevices()
+                    Logger.App.w(TAG, "清空现有设备")
+                }
+
+                repository.addDevices(devicesToImport)
+                repository.notifyHookProcess()
+
+                _importExportStatus.value = "成功导入 ${devicesToImport.size} 个设备"
+                Logger.App.i(TAG, "Imported ${devicesToImport.size} devices from $uri")
+
+                // 刷新设备计数
+                refreshDeviceCount()
+
+            } catch (e: Exception) {
+                _importExportStatus.value = "导入失败: ${e.message}"
+                Logger.App.e(TAG, "Import failed", e)
             }
-            Result.success(0)
-        } catch (e: Exception) {
-            Logger.App.e(TAG, "Import setup failed", e)
-            Result.failure(e)
         }
     }
 

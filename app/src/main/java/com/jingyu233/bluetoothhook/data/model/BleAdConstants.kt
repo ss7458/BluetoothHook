@@ -48,7 +48,7 @@ object BleAdConstants {
         0x1829 to "Reconnection Configuration",
         0x183B to "Constellation",
         0x183C to "Telephone Bearer",
-        0x183E to "Device Time",
+        0x183E to "Physical Activity Monitor",  // 0x183E = Physical Activity Monitor (per Bluetooth SIG); 0x1847 is Device Time
         0x1843 to "Audio Input Control",
         0x1844 to "Volume Control",
         0x1845 to "Volume Offset Control",

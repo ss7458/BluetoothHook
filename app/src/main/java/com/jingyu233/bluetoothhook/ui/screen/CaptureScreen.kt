@@ -69,6 +69,7 @@ fun CaptureScreen(
     val hasActiveFilter by viewModel.hasActiveFilter.collectAsState()
     var showFilter by remember { mutableStateOf(false) }
     var showChart by remember { mutableStateOf(false) }
+    var showOverflowMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     // BLE 扫描权限
@@ -114,6 +115,43 @@ fun CaptureScreen(
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Default.ArrowBack, "返回")
+                    }
+                },
+                actions = {
+                    Box {
+                        IconButton(onClick = { showOverflowMenu = true }) {
+                            Icon(Icons.Default.MoreVert, "更多操作")
+                        }
+                        DropdownMenu(
+                            expanded = showOverflowMenu,
+                            onDismissRequest = { showOverflowMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("下载分享") },
+                                leadingIcon = { Icon(Icons.Default.Share, null) },
+                                enabled = allRecords.isNotEmpty(),
+                                onClick = {
+                                    showOverflowMenu = false
+                                    val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                                    exportLauncher.launch("bluetooth_capture_$timestamp.csv")
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("删除清空") },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        null,
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                },
+                                enabled = allRecords.isNotEmpty(),
+                                onClick = {
+                                    showOverflowMenu = false
+                                    viewModel.clear()
+                                }
+                            )
+                        }
                     }
                 }
             )
@@ -265,36 +303,6 @@ fun CaptureScreen(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                             )
                         }
-                    }
-
-                    // 导出按钮（仅图标）
-                    IconButton(
-                        onClick = {
-                            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-                            exportLauncher.launch("bluetooth_capture_$timestamp.csv")
-                        },
-                        enabled = allRecords.isNotEmpty(),
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Share,
-                            contentDescription = "导出CSV",
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    // 清空按钮（仅图标）
-                    IconButton(
-                        onClick = { viewModel.clear() },
-                        enabled = allRecords.isNotEmpty(),
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = "清空",
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(18.dp)
-                        )
                     }
                 }
             }

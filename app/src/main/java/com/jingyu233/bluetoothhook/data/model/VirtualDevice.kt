@@ -17,6 +17,8 @@ data class VirtualDevice(
     val name: String,
     val mac: String,           // 格式: AA:BB:CC:DD:EE:FF
     val rssi: Int,             // 范围: -100 to 0
+    val rssiMin: Int = 0,      // 信号抖动下限 (-100 to 0)，0 表示未启用抖动
+    val rssiMax: Int = 0,      // 信号抖动上限 (-100 to 0)，0 表示未启用抖动
     val advDataHex: String,    // 十六进制字符串 (最多31字节 for legacy, 254字节 for extended)
     val intervalMs: Long,      // 广播间隔（毫秒）
     val enabled: Boolean = true,
@@ -27,6 +29,20 @@ data class VirtualDevice(
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 ) {
+    /**
+     * 获取实际注入用的 RSSI 值。
+     * 若启用了信号抖动（rssiMin/rssiMax 均非0），则在范围内随机取值；
+     * 否则返回固定 rssi。
+     */
+    fun getInjectedRssi(): Int {
+        return if (rssiMin != 0 && rssiMax != 0) {
+            val (lo, hi) = if (rssiMin <= rssiMax) rssiMin to rssiMax else rssiMax to rssiMin
+            if (hi <= lo) rssi else (lo..hi).random()
+        } else {
+            rssi
+        }
+    }
+
     /**
      * 验证设备数据是否有效
      */

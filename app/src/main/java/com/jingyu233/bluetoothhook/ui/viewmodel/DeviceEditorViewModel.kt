@@ -77,6 +77,14 @@ class DeviceEditorViewModel(
         validateField("rssi", rssi.toString())
     }
 
+    fun updateRssiMin(rssiMin: Int) {
+        _device.value = _device.value.copy(rssiMin = rssiMin)
+    }
+
+    fun updateRssiMax(rssiMax: Int) {
+        _device.value = _device.value.copy(rssiMax = rssiMax)
+    }
+
     fun updateAdvData(advData: String) {
         // 支持多种十六进制格式：0x前缀、空格、冒号、连字符分隔
         val normalized = normalizeHexInput(advData)

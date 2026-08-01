@@ -60,21 +60,25 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     private val _macFilterPattern = MutableStateFlow("")
     val macFilterPattern = _macFilterPattern.asStateFlow()
 
+    private val _eventTypeFilter = MutableStateFlow(0) // 0 = no filter
+    val eventTypeFilter: StateFlow<Int> = _eventTypeFilter.asStateFlow()
+
     /** 是否有激活的过滤条件 */
     val hasActiveFilter: StateFlow<Boolean> = combine(
-        _rssiMinFilter, _rssiMaxFilter, _macFilterPattern
-    ) { min, max, mac ->
-        min != null || max != null || mac.isNotBlank()
+        _rssiMinFilter, _rssiMaxFilter, _macFilterPattern, _eventTypeFilter
+    ) { min, max, mac, eventTypeBits ->
+        min != null || max != null || mac.isNotBlank() || eventTypeBits > 0
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     /** 经过过滤后的记录列表 */
     val filteredRecords: StateFlow<List<CaptureRecord>> = combine(
-        captureRecords, _rssiMinFilter, _rssiMaxFilter, _macFilterPattern
-    ) { records, min, max, mac ->
+        captureRecords, _rssiMinFilter, _rssiMaxFilter, _macFilterPattern, _eventTypeFilter
+    ) { records, min, max, mac, eventTypeBits ->
         records.filter { rec ->
             (min == null || rec.rssi >= min) &&
             (max == null || rec.rssi <= max) &&
-            (mac.isBlank() || macMatches(rec.mac, mac))
+            (mac.isBlank() || macMatches(rec.mac, mac)) &&
+            (eventTypeBits == 0 || (rec.eventType and eventTypeBits) != 0)
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), captureRecords.value)
 
@@ -91,10 +95,12 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     fun setRssiMinFilter(value: Int?) { _rssiMinFilter.value = value }
     fun setRssiMaxFilter(value: Int?) { _rssiMaxFilter.value = value }
     fun setMacFilterPattern(value: String) { _macFilterPattern.value = value }
+    fun setEventTypeFilter(bits: Int) { _eventTypeFilter.value = bits }
     fun clearFilters() {
         _rssiMinFilter.value = null
         _rssiMaxFilter.value = null
         _macFilterPattern.value = ""
+        _eventTypeFilter.value = 0
     }
 
     /** 简单的 MAC 通配符匹配：?=单字符, *=多字符 */

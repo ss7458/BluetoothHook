@@ -138,6 +138,65 @@ fun DeviceEditorScreen(
                 }
             }
 
+            // 信号抖动范围
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "信号抖动 (随机RSSI范围)",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            text = "开启后每次注入在范围内随机取值，模拟真实信号波动；两端均为0则固定使用上方RSSI",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("-100 dBm", style = MaterialTheme.typography.bodySmall)
+                            val jitterEnabled = device.rssiMin != 0 || device.rssiMax != 0
+                            Text(
+                                if (jitterEnabled) "${device.rssiMin} ~ ${device.rssiMax} dBm" else "未启用",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = if (jitterEnabled)
+                                    MaterialTheme.colorScheme.primary
+                                else
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text("0 dBm", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        RangeSlider(
+                            value = device.rssiMin.toFloat()..device.rssiMax.toFloat(),
+                            onValueChange = { range ->
+                                viewModel.updateRssiMin(range.start.toInt())
+                                viewModel.updateRssiMax(range.endInclusive.toInt())
+                            },
+                            valueRange = -100f..0f,
+                            steps = 99
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "最小 ${device.rssiMin} dBm",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "最大 ${device.rssiMax} dBm",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
             // 广播数据
             item {
                 val mode = device.getAdvertisingMode()

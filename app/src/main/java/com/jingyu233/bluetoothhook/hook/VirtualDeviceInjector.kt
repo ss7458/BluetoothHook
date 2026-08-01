@@ -136,8 +136,9 @@ class VirtualDeviceInjector(
             return
         }
 
-        if (!scanResultBuilder.isValidRssi(device.rssi)) {
-            Logger.Hook.w(TAG, "Invalid RSSI for device ${device.name}: ${device.rssi}")
+        val injectRssi = device.getInjectedRssi()
+        if (!scanResultBuilder.isValidRssi(injectRssi)) {
+            Logger.Hook.w(TAG, "Invalid RSSI for device ${device.name}: $injectRssi")
             return
         }
 
@@ -152,7 +153,7 @@ class VirtualDeviceInjector(
         // 构造ScanResult
         val scanResult = scanResultBuilder.buildScanResult(
             macAddress = device.mac,
-            rssi = device.rssi,
+            rssi = injectRssi,
             advDataHex = device.advDataHex,
             scanResponseHex = device.scanResponseHex,
             useExtendedAdvertising = device.useExtendedAdvertising,

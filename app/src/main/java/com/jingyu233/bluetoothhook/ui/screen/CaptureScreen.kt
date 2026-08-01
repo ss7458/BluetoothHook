@@ -11,6 +11,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -28,7 +29,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.core.content.ContextCompat
@@ -61,8 +65,10 @@ fun CaptureScreen(
     val rssiMin by viewModel.rssiMinFilter.collectAsState()
     val rssiMax by viewModel.rssiMaxFilter.collectAsState()
     val macPattern by viewModel.macFilterPattern.collectAsState()
+    val eventTypeBits by viewModel.eventTypeFilter.collectAsState()
     val hasActiveFilter by viewModel.hasActiveFilter.collectAsState()
     var showFilter by remember { mutableStateOf(false) }
+    var showChart by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     // BLE 扫描权限
@@ -216,6 +222,20 @@ fun CaptureScreen(
 
                     Spacer(modifier = Modifier.weight(1f))
 
+                    // 信号图切换按钮
+                    IconButton(
+                        onClick = { showChart = !showChart },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            if (showChart) Icons.Default.BarChart else Icons.Default.ShowChart,
+                            contentDescription = "信号图",
+                            tint = if (showChart) MaterialTheme.colorScheme.primary
+                                   else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
                     // 过滤切换按钮
                     IconButton(
                         onClick = { showFilter = !showFilter },
@@ -285,9 +305,19 @@ fun CaptureScreen(
                     rssiMin = rssiMin,
                     rssiMax = rssiMax,
                     macPattern = macPattern,
+                    selectedEventTypeBits = eventTypeBits,
                     onRssiMinChange = { viewModel.setRssiMinFilter(it) },
                     onRssiMaxChange = { viewModel.setRssiMaxFilter(it) },
                     onMacPatternChange = { viewModel.setMacFilterPattern(it) },
+                    onEventTypeFilterChange = { viewModel.setEventTypeFilter(it) },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+
+            // 信号趋势图（可折叠）
+            if (showChart && records.isNotEmpty()) {
+                SignalChart(
+                    records = records,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
             }
@@ -355,6 +385,169 @@ private fun PulsingDot() {
     )
 }
 
+// ── 信号趋势图组件 ────────────────────────────────────────
+
+/**
+ * RSSI 随时间变化的折线图。
+ * 按 MAC 分组绘制不同颜色的曲线，X 轴为时间，Y 轴为 RSSI (-100..0)。
+ */
+@Composable
+private fun SignalChart(
+    records: List<CaptureRecord>,
+    modifier: Modifier = Modifier
+) {
+    // 按 MAC 分组并按时间排序
+    val grouped = remember(records) {
+        records
+            .groupBy { it.mac }
+            .mapValues { (_, list) -> list.sortedBy { it.timestamp } }
+            .toList()
+            .sortedByDescending { (_, list) -> list.lastOrNull()?.timestamp ?: 0L }
+    }
+
+    // 稳定色板（设备多时循环使用）
+    val palette = listOf(
+        Color(0xFF4FC3F7), // 浅蓝
+        Color(0xFFFF7043), // 橙
+        Color(0xFF66BB6A), // 绿
+        Color(0xFFAB47BC), // 紫
+        Color(0xFFFFA726), // 琥珀
+        Color(0xFFEC407A), // 粉
+        Color(0xFF26A69A), // 青
+        Color(0xFF5C6BC0)  // 靛
+    )
+
+    // 时间范围
+    val minTime = records.minOfOrNull { it.timestamp } ?: 0L
+    val maxTime = records.maxOfOrNull { it.timestamp } ?: 0L
+    val timeSpan = (maxTime - minTime).coerceAtLeast(1L)
+    val timeFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "信号趋势",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                Text(
+                    text = "${grouped.size} 个设备",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 图表区
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(140.dp)
+            ) {
+                val chartLeft = 0f
+                val chartRight = size.width
+                val chartTop = 0f
+                val chartBottom = size.height
+
+                // 横向网格线 + RSSI 刻度标注
+                val rssiTicks = listOf(-100, -80, -60, -40, -20, 0)
+                rssiTicks.forEach { rssiVal ->
+                    val y = chartBottom - (rssiVal + 100) / 100f * chartBottom
+                    drawLine(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                        start = Offset(chartLeft, y),
+                        end = Offset(chartRight, y),
+                        strokeWidth = 1f
+                    )
+                }
+
+                // 每条设备曲线
+                grouped.forEachIndexed { index, (_, deviceRecords) ->
+                    val color = palette[index % palette.size]
+                    if (deviceRecords.size < 2) {
+                        // 单点画圆点
+                        val rssi = deviceRecords.first().rssi
+                        val x = chartLeft + (deviceRecords.first().timestamp - minTime).toFloat() / timeSpan * (chartRight - chartLeft)
+                        val y = chartBottom - (rssi + 100) / 100f * chartBottom
+                        drawCircle(
+                            color = color,
+                            radius = 3.dp.toPx(),
+                            center = Offset(x, y)
+                        )
+                    } else {
+                        val path = Path()
+                        deviceRecords.forEachIndexed { i, rec ->
+                            val x = chartLeft + (rec.timestamp - minTime).toFloat() / timeSpan * (chartRight - chartLeft)
+                            val y = chartBottom - (rec.rssi + 100) / 100f * chartBottom
+                            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                        }
+                        drawPath(
+                            path = path,
+                            color = color,
+                            style = Stroke(width = 2.dp.toPx())
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // X 轴时间标注
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = timeFormat.format(Date(minTime)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = timeFormat.format(Date(maxTime)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 图例（每设备一行：色点 + MAC + 最新RSSI）
+            OptIn(ExperimentalLayoutApi::class)
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                grouped.forEachIndexed { index, (mac, deviceRecords) ->
+                    val color = palette[index % palette.size]
+                    val latest = deviceRecords.lastOrNull()?.rssi
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(color)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (latest != null) "$mac  $latest dBm" else mac,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 // ── 过滤条组件 ────────────────────────────────────────────
 
 @Composable
@@ -362,39 +555,103 @@ private fun FilterBar(
     rssiMin: Int?,
     rssiMax: Int?,
     macPattern: String,
+    selectedEventTypeBits: Int,
     onRssiMinChange: (Int?) -> Unit,
     onRssiMaxChange: (Int?) -> Unit,
     onMacPatternChange: (String) -> Unit,
+    onEventTypeFilterChange: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val currentMin = rssiMin ?: -100
+    val currentMax = rssiMax ?: 0
+    val rssiRange = remember(rssiMin, rssiMax) {
+        mutableStateOf(currentMin.toFloat()..currentMax.toFloat())
+    }
+
     Card(modifier = modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Text("过滤条件", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("RSSI:", style = MaterialTheme.typography.bodySmall)
-                Spacer(modifier = Modifier.width(4.dp))
-                OutlinedTextField(
-                    value = rssiMin?.toString() ?: "",
-                    onValueChange = { onRssiMinChange(it.toIntOrNull()) },
-                    placeholder = { Text("最小", style = MaterialTheme.typography.bodySmall) },
-                    modifier = Modifier.width(64.dp).height(48.dp),
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall
-                )
-                Text(" ~ ", style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(
-                    value = rssiMax?.toString() ?: "",
-                    onValueChange = { onRssiMaxChange(it.toIntOrNull()) },
-                    placeholder = { Text("最大", style = MaterialTheme.typography.bodySmall) },
-                    modifier = Modifier.width(64.dp).height(48.dp),
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("dBm", style = MaterialTheme.typography.bodySmall)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("过滤条件", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                if (rssiMin != null || rssiMax != null) {
+                    TextButton(
+                        onClick = {
+                            onRssiMinChange(null)
+                            onRssiMaxChange(null)
+                        },
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier.height(24.dp)
+                    ) {
+                        Text("重置RSSI", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // RSSI 范围滑块
+            Text("RSSI 范围", style = MaterialTheme.typography.labelSmall)
+            RangeSlider(
+                value = rssiRange.value,
+                onValueChange = { newRange ->
+                    rssiRange.value = newRange
+                    val startInt = newRange.start.toInt()
+                    val endInt = newRange.endInclusive.toInt()
+                    if (startInt == -100 && endInt == 0) {
+                        onRssiMinChange(null)
+                        onRssiMaxChange(null)
+                    } else {
+                        onRssiMinChange(startInt)
+                        onRssiMaxChange(endInt)
+                    }
+                },
+                valueRange = -100f..0f,
+                steps = 199,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Text(
+                text = "${rssiRange.value.start.toInt()} ~ ${rssiRange.value.endInclusive.toInt()} dBm",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 蓝牙类型过滤
+            Text("蓝牙类型", style = MaterialTheme.typography.labelSmall)
+            Spacer(modifier = Modifier.height(4.dp))
+            val eventTypeOptions = listOf(
+                "可连接" to 0x01,
+                "可扫描" to 0x02,
+                "传统" to 0x10,
+                "定向" to 0x04,
+                "扫描响应" to 0x08
+            )
+            OptIn(ExperimentalLayoutApi::class)
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                eventTypeOptions.forEach { (label, bit) ->
+                    val isSelected = (selectedEventTypeBits and bit) != 0
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = {
+                            if (isSelected) {
+                                onEventTypeFilterChange(selectedEventTypeBits and bit.inv())
+                            } else {
+                                onEventTypeFilterChange(selectedEventTypeBits or bit)
+                            }
+                        },
+                        label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("MAC:", style = MaterialTheme.typography.bodySmall)
                 Spacer(modifier = Modifier.width(4.dp))

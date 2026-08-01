@@ -746,7 +746,7 @@ class BluetoothScanHook(
 
                     val intent = Intent(BluetoothDevice.ACTION_FOUND).apply {
                         putExtra(BluetoothDevice.EXTRA_DEVICE, btDevice)
-                        putExtra(BluetoothDevice.EXTRA_RSSI, device.rssi.toShort())
+                        putExtra(BluetoothDevice.EXTRA_RSSI, device.getInjectedRssi().toShort())
                         putExtra(BluetoothDevice.EXTRA_NAME, device.name)
                         // EXTRA_CLASS 传原始 int，避免  hidden-API BluetoothClass(int) 被拦截
                         putExtra(BluetoothDevice.EXTRA_CLASS, 0x5A020C.toInt()) // Phone / Smartphone
@@ -777,7 +777,7 @@ class BluetoothScanHook(
             for (device in devices) {
                 if (!device.enabled) continue
                 try {
-                    injectViaEventManager(device.mac, device.name, device.rssi)
+                    injectViaEventManager(device.mac, device.name, device.getInjectedRssi())
                 } catch (_: Throwable) {}
             }
         } catch (_: Throwable) {}
@@ -810,7 +810,7 @@ class BluetoothScanHook(
             try {
                 val scanResult = scanResultBuilder.buildScanResult(
                     macAddress = device.mac,
-                    rssi = device.rssi,
+                    rssi = device.getInjectedRssi(),
                     advDataHex = device.advDataHex,
                     scanResponseHex = device.scanResponseHex,
                     useExtendedAdvertising = device.useExtendedAdvertising,

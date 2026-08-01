@@ -387,10 +387,11 @@ class BluetoothScanHook(
             val deviceMgr = cachedBluetoothDeviceManager ?: return
             val btAdapter = BluetoothAdapter.getDefaultAdapter() ?: return
             val btDevice = btAdapter.getRemoteDevice(deviceMac) ?: return
-            val cachedDevice = XposedHelpers.callMethod(deviceMgr, "findDevice", btDevice)
+            // findDevice 返回 null 表示设备未注册，先通过 addDevice 注册
+            var cachedDevice: Any? = XposedHelpers.callMethod(deviceMgr, "findDevice", btDevice)
             if (cachedDevice == null) {
-                Logger.Hook.d(TAG, "EventManager inject: device not found in manager for $deviceMac")
-                return
+                cachedDevice = XposedHelpers.callMethod(deviceMgr, "addDevice", btDevice)
+                if (cachedDevice == null) return
             }
             val eventMgr = bluetoothEventManager ?: return
             XposedHelpers.callMethod(eventMgr, "dispatchDeviceAdded", cachedDevice)

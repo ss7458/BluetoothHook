@@ -500,17 +500,17 @@ private fun CaptureRecordCard(
                 }
             }
 
-            // 第三行：附加参数（含中文标注）
+            // 第三行：附加参数（含中文标注，Event 长标签独占一行避免挤压 PHY/Addr）
             Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Event: ${record.eventTypeLabel}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text(
-                    text = "Event: ${record.eventTypeLabel}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
                 Text(
                     text = "Phy: ${record.phyLabel}",
                     style = MaterialTheme.typography.labelSmall,

@@ -687,7 +687,7 @@ class BluetoothScanHook(
 
                     val intent = Intent(BluetoothDevice.ACTION_FOUND).apply {
                         putExtra(BluetoothDevice.EXTRA_DEVICE, btDevice)
-                        putExtra(BluetoothDevice.EXTRA_RSSI, device.rssi)
+                        putExtra(BluetoothDevice.EXTRA_RSSI, device.rssi.toShort())
                         putExtra(BluetoothDevice.EXTRA_NAME, device.name)
                     }
                     context.sendBroadcast(intent)

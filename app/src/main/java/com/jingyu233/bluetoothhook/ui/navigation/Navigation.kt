@@ -13,6 +13,7 @@ import com.jingyu233.bluetoothhook.ui.screen.CaptureDetailScreen
 import com.jingyu233.bluetoothhook.ui.screen.CaptureScreen
 import com.jingyu233.bluetoothhook.ui.screen.DeviceEditorScreen
 import com.jingyu233.bluetoothhook.ui.screen.DeviceListScreen
+import com.jingyu233.bluetoothhook.ui.screen.ScaleSimulatorScreen
 import com.jingyu233.bluetoothhook.ui.screen.SettingsScreen
 
 /**
@@ -29,6 +30,7 @@ sealed class Screen(val route: String) {
         fun createRoute(recordId: Long) = "capture_detail/$recordId"
     }
     object Settings : Screen("settings")
+    object ScaleSimulator : Screen("scale_simulator")
 }
 
 /**
@@ -50,6 +52,9 @@ fun BluetoothHookNavigation() {
                 },
                 onNavigateToCapture = {
                     navController.navigate(Screen.CaptureLog.route)
+                },
+                onNavigateToScale = {
+                    navController.navigate(Screen.ScaleSimulator.route)
                 }
             )
         }
@@ -72,6 +77,13 @@ fun BluetoothHookNavigation() {
         // 设置屏幕
         composable(Screen.Settings.route) {
             SettingsScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        // 体重秤模拟屏幕
+        composable(Screen.ScaleSimulator.route) {
+            ScaleSimulatorScreen(
                 onNavigateBack = { navController.popBackStack() }
             )
         }

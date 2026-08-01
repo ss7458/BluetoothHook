@@ -1,6 +1,7 @@
 package com.jingyu233.bluetoothhook.data.bridge
 
 import android.content.Context
+import com.jingyu233.bluetoothhook.data.model.ScaleSimulatorConfig
 import com.jingyu233.bluetoothhook.data.model.VirtualDevice
 import com.jingyu233.bluetoothhook.utils.Logger
 import kotlinx.serialization.json.Json
@@ -26,6 +27,7 @@ class ConfigBridge(private val context: Context) {
         const val KEY_CAPTURE_ENABLED = "capture_enabled"
         private const val KEY_CLASSIC_INTERVAL_MS = "classic_interval_ms"
         private const val KEY_INJECTION_MODE = "injection_mode"
+        private const val KEY_SCALE_CONFIG = "scale_config"
         private const val KEY_LAST_UPDATED = "last_updated"
 
         private val json = Json {
@@ -265,6 +267,52 @@ class ConfigBridge(private val context: Context) {
     }
 
     /**
+     * 设置体重秤模拟器配置
+     */
+    fun setScaleConfig(config: ScaleSimulatorConfig) {
+        try {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.edit()
+                .putString(KEY_SCALE_CONFIG, json.encodeToString(config))
+                .putLong(KEY_LAST_UPDATED, System.currentTimeMillis())
+                .commit()
+            ensurePrefsWorldReadable()
+            writeFallbackConfigFile()
+            Logger.App.d(TAG, "Set scale_config: enabled=${config.enabled}, weight=${config.targetWeightKg}kg")
+            com.jingyu233.bluetoothhook.data.bridge.CaptureBridge.pushConfigUpdate()
+        } catch (e: Exception) {
+            Logger.App.e(TAG, "Failed to set scale config", e)
+        }
+    }
+
+    /**
+     * 获取体重秤模拟器配置
+     */
+    fun getScaleConfig(): ScaleSimulatorConfig {
+        return try {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            val raw = prefs.getString(KEY_SCALE_CONFIG, null) ?: return ScaleSimulatorConfig()
+            json.decodeFromString<ScaleSimulatorConfig>(raw)
+        } catch (e: Exception) {
+            Logger.App.e(TAG, "Failed to get scale config", e)
+            ScaleSimulatorConfig()
+        }
+    }
+
+    /**
+     * 获取体重秤配置 JSON（供 TCP 配置同步使用）
+     */
+    fun getScaleConfigJson(): String {
+        return try {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.getString(KEY_SCALE_CONFIG, null) ?: ""
+        } catch (e: Exception) {
+            Logger.App.e(TAG, "Failed to get scale config JSON", e)
+            ""
+        }
+    }
+
+    /**
      * 确保SharedPreferences文件对其他进程可读（XSharedPreferences需要）
      * Android 10+ 上 XSharedPreferences 无法跨进程读 MODE_PRIVATE 文件，
      * 必须从模块自身进程设置文件权限
@@ -299,7 +347,8 @@ class ConfigBridge(private val context: Context) {
             val captureEnabled = prefs.getBoolean(KEY_CAPTURE_ENABLED, false)
 
             val classicInterval = prefs.getInt(KEY_CLASSIC_INTERVAL_MS, 5000)
-            val configJson = """{"global_enabled":$globalEnabled,"capture_enabled":$captureEnabled,"classic_interval_ms":$classicInterval,"devices":$devicesJson}"""
+            val scaleJson = prefs.getString(KEY_SCALE_CONFIG, "") ?: ""
+            val configJson = """{"global_enabled":$globalEnabled,"capture_enabled":$captureEnabled,"classic_interval_ms":$classicInterval,"scale_config":$scaleJson,"devices":$devicesJson}"""
             val fallbackFile = File(fallbackDir, "bthook_config.json")
             val tmpFile = File(fallbackDir, "bthook_config.json.tmp")
             tmpFile.writeText(configJson, Charsets.UTF_8)

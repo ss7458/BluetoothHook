@@ -24,7 +24,8 @@ fun DeviceListScreen(
     viewModel: DeviceListViewModel = viewModel(),
     onNavigateToEditor: (String?) -> Unit,
     onNavigateToSettings: () -> Unit,
-    onNavigateToCapture: () -> Unit
+    onNavigateToCapture: () -> Unit,
+    onNavigateToScale: () -> Unit
 ) {
     val devices by viewModel.devices.collectAsState(initial = emptyList())
     val globalEnabled by viewModel.globalEnabled.collectAsState()
@@ -38,6 +39,9 @@ fun DeviceListScreen(
                 actions = {
                     IconButton(onClick = onNavigateToCapture) {
                         Icon(Icons.Default.BluetoothSearching, "扫描抓包")
+                    }
+                    IconButton(onClick = onNavigateToScale) {
+                        Icon(Icons.Default.MonitorWeight, "体重秤")
                     }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Default.Settings, "设置")

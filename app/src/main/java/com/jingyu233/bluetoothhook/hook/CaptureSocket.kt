@@ -18,6 +18,7 @@ data class SyncedConfig(
     val devicesJson: String = "[]",
     val classicIntervalMs: Int = 5000,
     val injectionMode: String = "insert",  // ADD THIS: "insert" or "override"
+    val scaleJson: String = "",            // 体重秤模拟器配置 JSON
     val timestamp: Long = 0L
 )
 
@@ -215,6 +216,11 @@ object CaptureSocket {
                     configCache = current.copy(injectionMode = mode)
                     Logger.Hook.d(TAG, "Config hot-push: injection_mode=$mode")
                 }
+                "scale" -> {
+                    val scaleJson = parts[2]
+                    configCache = current.copy(scaleJson = scaleJson)
+                    Logger.Hook.d(TAG, "Config hot-push: scale_config=${if (scaleJson.isBlank()) "none" else "present"}")
+                }
             }
         } catch (e: Exception) {
             Logger.Hook.w(TAG, "processConfigLine error: ${e.message}")
@@ -234,6 +240,7 @@ object CaptureSocket {
             var devicesJson = current.devicesJson
             var classicIntervalMs = current.classicIntervalMs
             var injectionMode = current.injectionMode
+            var scaleJson = current.scaleJson
             var timestamp = current.timestamp
             var configLineCount = 0
 
@@ -269,6 +276,10 @@ object CaptureSocket {
                         injectionMode = parts[2]
                         Logger.Hook.d(TAG, "Config: injection_mode=$injectionMode")
                     }
+                    "scale" -> {
+                        scaleJson = parts[2]
+                        Logger.Hook.d(TAG, "Config: scale_config=${if (parts[2].isBlank()) "none" else "present"}")
+                    }
                 }
             }
 
@@ -278,6 +289,7 @@ object CaptureSocket {
                 devicesJson = devicesJson,
                 classicIntervalMs = classicIntervalMs,
                 injectionMode = injectionMode,
+                scaleJson = scaleJson,
                 timestamp = timestamp
             )
             Logger.Hook.d(TAG, "readConfigFromServer finished, $configLineCount line(s) read")

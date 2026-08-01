@@ -338,6 +338,9 @@ object CaptureBridge {
         val injectionMode = configBridge.getInjectionMode()
         os.write("CFG|injection_mode|$injectionMode\n".toByteArray(Charsets.UTF_8))
 
+        val scaleJson = configBridge.getScaleConfigJson()
+        os.write("CFG|scale|$scaleJson\n".toByteArray(Charsets.UTF_8))
+
         os.write("CFG|END\n".toByteArray(Charsets.UTF_8))
         os.flush()
     }

@@ -61,6 +61,7 @@ class BluetoothScanHook(
 
     private lateinit var scanResultBuilder: ScanResultBuilder
     private lateinit var virtualDeviceInjector: VirtualDeviceInjector
+    private lateinit var scaleSimulatorInjector: ScaleSimulatorInjector
 
     // ── 自适应发现/解析跟踪 ──────────────────────────────────
     private var classFound: String = "NONE"
@@ -105,6 +106,7 @@ class BluetoothScanHook(
 
             scanResultBuilder = ScanResultBuilder(classLoader)
             virtualDeviceInjector = VirtualDeviceInjector(scanResultBuilder, prefs)
+            scaleSimulatorInjector = ScaleSimulatorInjector(scanResultBuilder)
 
             hookBluetoothEventManager()
 
@@ -429,6 +431,8 @@ class BluetoothScanHook(
                     }
                     if (cachedGlobalEnabled) {
                         injectVirtualDevicesAdaptive(instance)
+                        // 体重秤模拟器注入（复用已解析的 scanQueue/scannerMap）
+                        injectScaleSimulator(instance)
                         // 经典蓝牙发现广播：动态间隔（从 configCache 读取，1-30秒范围）
                         val classicIntervalMs = (CaptureSocket.configCache.classicIntervalMs
                             .coerceIn(1000, 30000))
@@ -593,8 +597,33 @@ class BluetoothScanHook(
         }
     }
 
-    // ── 自适应字段/方法解析 ──────────────────────────────────
+    /**
+     * 体重秤模拟器注入：复用已解析的 scannerMap/scanQueue，
+     * 将 ScaleSimulatorInjector 生成的体重秤广播投递给所有扫描客户端。
+     */
+    private fun injectScaleSimulator(instance: Any) {
+        try {
+            // 确保注入上下文已解析（首次失败时静默，等待后续 tick 重试）
+            if (!resolveAttempted) {
+                cachedScanManager = resolveScanManager(instance)
+                if (cachedScanManager != null) {
+                    cachedScannerMap = resolveScannerMap(instance, cachedScanManager!!)
+                    cachedScanQueue = resolveScanQueue(cachedScanManager!!)
+                    resolveAttempted = true
+                }
+            }
 
+            val scannerMap = cachedScannerMap ?: return
+            val scanQueue = cachedScanQueue ?: return
+            if (scanQueue.isEmpty()) return
+
+            scaleSimulatorInjector.injectOnce(scanQueue, scannerMap)
+        } catch (e: Throwable) {
+            Logger.Hook.d(TAG, "injectScaleSimulator error: ${e.message}")
+        }
+    }
+
+    // ── 自适应字段/方法解析 ──────────────────────────────────
     /** 解析 scanManager（多候选名回退） */
     private fun resolveScanManager(instance: Any): Any? {
         // 1) mScanManager

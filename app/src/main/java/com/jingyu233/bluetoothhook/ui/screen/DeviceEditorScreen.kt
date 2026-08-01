@@ -10,6 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -100,15 +101,53 @@ fun DeviceEditorScreen(
                 )
             }
 
-            // RSSI滑块
+            // 信号强度 + 信号抖动
             item {
+                // 抖动开关状态由配置推导：任一非 0 即视为启用
+                val jitterEnabled = device.rssiMin != 0 || device.rssiMax != 0
+
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "信号强度 (RSSI)",
+                            text = "信号强度",
                             style = MaterialTheme.typography.titleMedium
                         )
                         Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "信号抖动",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = "启用后 RSSI 在范围内随机变化",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = jitterEnabled,
+                                onCheckedChange = { enabled ->
+                                    if (enabled) {
+                                        // 开启时默认给一个 -60..-40 区间
+                                        viewModel.updateRssiMin(-60)
+                                        viewModel.updateRssiMax(-40)
+                                    } else {
+                                        // 关闭时归零（未启用抖动）
+                                        viewModel.updateRssiMin(0)
+                                        viewModel.updateRssiMax(0)
+                                    }
+                                }
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // 基础 RSSI 滑块
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
@@ -134,64 +173,40 @@ fun DeviceEditorScreen(
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
-                    }
-                }
-            }
 
-            // 信号抖动范围
-            item {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = "信号抖动 (随机RSSI范围)",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        Text(
-                            text = "开启后每次注入在范围内随机取值，模拟真实信号波动；两端均为0则固定使用上方RSSI",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("-100 dBm", style = MaterialTheme.typography.bodySmall)
-                            val jitterEnabled = device.rssiMin != 0 || device.rssiMax != 0
+                        // 信号抖动范围（开关打开时才显示）
+                        if (jitterEnabled) {
+                            Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                if (jitterEnabled) "${device.rssiMin} ~ ${device.rssiMax} dBm" else "未启用",
-                                style = MaterialTheme.typography.titleLarge,
-                                color = if (jitterEnabled)
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text("0 dBm", style = MaterialTheme.typography.bodySmall)
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        RangeSlider(
-                            value = device.rssiMin.toFloat()..device.rssiMax.toFloat(),
-                            onValueChange = { range ->
-                                viewModel.updateRssiMin(range.start.toInt())
-                                viewModel.updateRssiMax(range.endInclusive.toInt())
-                            },
-                            valueRange = -100f..0f,
-                            steps = 99
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                "最小 ${device.rssiMin} dBm",
+                                text = "信号抖动范围",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Text(
-                                "最大 ${device.rssiMax} dBm",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            Spacer(modifier = Modifier.height(4.dp))
+                            RangeSlider(
+                                value = device.rssiMin.toFloat()..device.rssiMax.toFloat(),
+                                onValueChange = { range ->
+                                    viewModel.updateRssiMin(range.start.toInt())
+                                    viewModel.updateRssiMax(range.endInclusive.toInt())
+                                },
+                                valueRange = -100f..0f,
+                                steps = 99
                             )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    "最小 ${device.rssiMin} dBm",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    "最大 ${device.rssiMax} dBm",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }

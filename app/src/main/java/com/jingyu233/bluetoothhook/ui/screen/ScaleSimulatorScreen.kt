@@ -1,5 +1,7 @@
 package com.jingyu233.bluetoothhook.ui.screen
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -63,6 +65,15 @@ fun ScaleSimulatorScreen(
                 EnableScaleCard(
                     enabled = config.enabled,
                     onEnabledChange = { viewModel.setEnabled(it) }
+                )
+            }
+
+            // 实时注入体重（本地模拟爬升曲线）
+            item {
+                LiveWeightCard(
+                    enabled = config.enabled,
+                    targetWeightKg = config.targetWeightKg,
+                    rampDurationMs = config.rampDurationMs
                 )
             }
 
@@ -164,6 +175,93 @@ private fun EnableScaleCard(
     }
 }
 
+// ── 实时注入体重 ────────────────────────────────────────────
+
+/**
+ * 实时注入体重（界面本地模拟，不依赖 hook 回传）。
+ * 开启后体重按 ease-out 曲线 1-(1-t)^2 在 rampDurationMs 内从 0 爬到目标值，
+ * 之后保持"已稳定"。暂停或配置变更（目标体重/爬升时长）时从头重置。
+ */
+@Composable
+private fun LiveWeightCard(
+    enabled: Boolean,
+    targetWeightKg: Double,
+    rampDurationMs: Long
+) {
+    val progress = remember { Animatable(0f) }
+
+    LaunchedEffect(enabled, targetWeightKg, rampDurationMs) {
+        progress.snapTo(0f)
+        if (enabled) {
+            progress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = rampDurationMs.toInt(),
+                    easing = { t -> 1f - (1f - t) * (1f - t) }
+                )
+            )
+        }
+    }
+
+    val currentWeight = targetWeightKg * progress.value
+    val isRamping = progress.value < 1f
+    val statusText = when {
+        !enabled -> "未启用"
+        isRamping -> "爬升中…"
+        else -> "已稳定"
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "实时注入体重",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = String.format("%.2f kg", currentWeight),
+                    style = MaterialTheme.typography.displaySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = if (enabled)
+                        MaterialTheme.colorScheme.primary
+                    else
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = when {
+                        !enabled -> MaterialTheme.colorScheme.surfaceVariant
+                        isRamping -> MaterialTheme.colorScheme.secondaryContainer
+                        else -> MaterialTheme.colorScheme.primaryContainer
+                    }
+                ) {
+                    Text(
+                        text = statusText,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = when {
+                            !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
+                            isRamping -> MaterialTheme.colorScheme.onSecondaryContainer
+                            else -> MaterialTheme.colorScheme.onPrimaryContainer
+                        },
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "界面模拟显示，实际以第三方 BLE 扫描 App 收到的广播为准",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
 // ── 体重设置 ────────────────────────────────────────────────
 
 @Composable
@@ -223,7 +321,7 @@ private fun ImpedanceCard(
     impedanceOhm: Int,
     onImpedanceChange: (Int) -> Unit
 ) {
-    val sliderValue = remember(impedanceOhm) { mutableFloatStateOf(impedanceOhm.toFloat()) }
+    val sliderValue = remember(impedanceOhm) { mutableFloatStateOf(impedanceOhm.coerceIn(0, 600).toFloat()) }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -252,7 +350,7 @@ private fun ImpedanceCard(
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold
                 )
-                Text("2000 Ω", style = MaterialTheme.typography.bodySmall)
+                Text("600 Ω", style = MaterialTheme.typography.bodySmall)
             }
 
             Slider(
@@ -261,8 +359,8 @@ private fun ImpedanceCard(
                 onValueChangeFinished = {
                     onImpedanceChange(sliderValue.value.toInt())
                 },
-                valueRange = 0f..2000f,
-                steps = 199
+                valueRange = 0f..600f,
+                steps = 59
             )
         }
     }

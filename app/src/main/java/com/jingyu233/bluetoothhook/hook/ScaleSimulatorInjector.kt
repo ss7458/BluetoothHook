@@ -42,10 +42,6 @@ class ScaleSimulatorInjector(
     @Volatile
     private var lastInjectMs = 0L
 
-    /** 稳定后交替状态用 */
-    @Volatile
-    private var stableTick = 0
-
     /** 上次读到的配置（避免每帧重读） */
     @Volatile
     private var cachedConfig: ScaleSimulatorConfig = ScaleSimulatorConfig()
@@ -74,7 +70,6 @@ class ScaleSimulatorInjector(
                 cachedConfig = config
                 phase = Phase.RAMPING
                 sessionStartMs = now
-                stableTick = 0
                 Logger.Hook.i(TAG, "Scale session started: target=${config.targetWeightKg}kg, imp=${config.impedanceOhm}Ω")
             }
 
@@ -171,24 +166,21 @@ class ScaleSimulatorInjector(
             if (t >= 1f) {
                 // 达到目标，进入稳定阶段
                 phase = Phase.STABLE
-                stableTick = 0
                 Logger.Hook.i(TAG, "Scale reached target ${config.targetWeightKg}kg (stable)")
             } else {
                 // ease-out 曲线：先快后慢 (1-(1-t)^2)
                 val eased = 1f - (1f - t) * (1f - t)
                 val weight = config.targetWeightKg * eased
-                // 爬升期：阻抗 0（未测），状态 0x24
-                return Triple(weight, 0, ScaleSimulatorConfig.STATUS_STABLE)
+                // 爬升期：阻抗 0（未测），状态 0x24（称重中）
+                return Triple(weight, 0, ScaleSimulatorConfig.STATUS_WEIGHING)
             }
         }
 
-        // 稳定阶段：目标体重，配置阻抗，状态 0x24/0x25 交替
-        stableTick++
-        val alternate = stableTick % 4 == 0  // 每 4 帧切换一次（约 400ms）
+        // 稳定阶段：目标体重，配置阻抗，状态 0x25（体重确认/稳定，实测稳定期为连续 0x25）
         return Triple(
             config.targetWeightKg,
             config.impedanceOhm,
-            if (alternate) ScaleSimulatorConfig.STATUS_STABLE_ALT else ScaleSimulatorConfig.STATUS_STABLE
+            ScaleSimulatorConfig.STATUS_CONFIRMED
         )
     }
 

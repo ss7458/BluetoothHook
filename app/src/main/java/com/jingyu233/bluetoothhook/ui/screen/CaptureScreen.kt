@@ -387,6 +387,13 @@ private fun PulsingDot() {
 
 // ── 信号趋势图组件 ────────────────────────────────────────
 
+/** 信号趋势图按设备分组的排序方式 */
+private enum class ChartSortMode(val label: String) {
+    RecentActive("最近活跃"),
+    PacketCount("包数量"),
+    AvgRssi("信号强度")
+}
+
 /**
  * RSSI 随时间变化的折线图。
  * 按 MAC 分组绘制不同颜色的曲线，X 轴为时间，Y 轴为 RSSI (-100..0)。
@@ -396,13 +403,23 @@ private fun SignalChart(
     records: List<CaptureRecord>,
     modifier: Modifier = Modifier
 ) {
-    // 按 MAC 分组并按时间排序
-    val grouped = remember(records) {
-        records
+    // 排序方式（本地状态，切换即重排，默认最近活跃）
+    var sortMode by remember { mutableStateOf(ChartSortMode.RecentActive) }
+
+    // 按 MAC 分组，组内按时间升序；组间按所选排序模式排序
+    val grouped = remember(records, sortMode) {
+        val base = records
             .groupBy { it.mac }
             .mapValues { (_, list) -> list.sortedBy { it.timestamp } }
             .toList()
-            .sortedByDescending { (_, list) -> list.lastOrNull()?.timestamp ?: 0L }
+        when (sortMode) {
+            ChartSortMode.RecentActive -> // 最近活跃：组间按最新时间戳降序
+                base.sortedByDescending { (_, list) -> list.lastOrNull()?.timestamp ?: 0L }
+            ChartSortMode.PacketCount ->   // 包数量：组内记录条数降序
+                base.sortedByDescending { (_, list) -> list.size }
+            ChartSortMode.AvgRssi ->       // 信号强度：组内 RSSI 平均值降序
+                base.sortedByDescending { (_, list) -> list.map { it.rssi }.average() }
+        }
     }
 
     // 稳定色板（设备多时循环使用）
@@ -440,6 +457,25 @@ private fun SignalChart(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 排序方式选择器
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                ChartSortMode.entries.forEachIndexed { index, mode ->
+                    SegmentedButton(
+                        selected = sortMode == mode,
+                        onClick = { sortMode = mode },
+                        shape = SegmentedButtonDefaults.itemShape(
+                            index = index,
+                            count = ChartSortMode.entries.size
+                        ),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(mode.label, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -693,7 +729,10 @@ private fun CaptureRecordCard(
         )
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            // 第一行：时间、MAC、RSSI
+            // 从广播数据解析设备名（无名字时仅显示 MAC）
+            val deviceName = remember(record.advDataHex) { parseLocalName(record.advDataHex) }
+
+            // 第一行：时间、设备名/MAC、RSSI
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -707,14 +746,34 @@ private fun CaptureRecordCard(
                 )
                 Spacer(modifier = Modifier.width(12.dp))
 
-                // MAC 地址
-                Text(
-                    text = record.mac,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f)
-                )
+                // 设备名 + MAC：有名字时名字突出、MAC 弱化为次级文本；无名字时保持现状
+                if (deviceName != null) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = deviceName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = record.mac,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                } else {
+                    Text(
+                        text = record.mac,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
 
                 // RSSI
                 Surface(
@@ -782,6 +841,39 @@ private fun CaptureRecordCard(
             }
         }
     }
+}
+
+/**
+ * 从 BLE AD 广播数据中解析 Local Name（AD type 0x08/0x09，UTF-8）。
+ * 输入 advDataHex（纯 hex，自动去空白）。无名字或结构非法时返回 null，不抛异常。
+ * 结构：每段 [1 字节长度 L][1 字节 AD Type][L-1 字节数据]，L=0 为结束标记。
+ */
+private fun parseLocalName(advDataHex: String): String? {
+    if (advDataHex.isBlank()) return null
+    val hex = advDataHex.replace("\\s+".toRegex(), "")
+    if (hex.length % 2 != 0) return null
+    val bytes = try {
+        hex.chunked(2).map { it.toInt(16) and 0xFF }
+    } catch (_: NumberFormatException) {
+        return null
+    }
+
+    var i = 0
+    while (i + 1 < bytes.size) {
+        val len = bytes[i]
+        if (len == 0) break                     // 结束标记
+        if (i + 1 + len > bytes.size) break     // 段不完整，停止解析
+        val type = bytes[i + 1]
+        if (type == 0x08 || type == 0x09) {     // Local Name（短名/完整名）
+            val nameBytes = bytes.subList(i + 2, i + 1 + len)
+            if (nameBytes.isEmpty()) return null
+            return String(nameBytes.toByteArray(), Charsets.UTF_8)
+                .trim()
+                .takeIf { it.isNotEmpty() }
+        }
+        i += 1 + len
+    }
+    return null
 }
 
 /**

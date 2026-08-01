@@ -38,8 +38,8 @@ data class ScaleSimulatorConfig(
     val manualAdvHex: String = ""
 ) {
     companion object {
-        const val STATUS_STABLE = 0x24          // kg + 2位小数 + 稳定位
-        const val STATUS_STABLE_ALT = 0x25      // 稳定后交替出现的状态
+        const val STATUS_WEIGHING = 0x24        // 称重中（体重爬升/未稳定）
+        const val STATUS_CONFIRMED = 0x25       // 体重确认/稳定（3.pcapng 实测稳定期以 0x25 为主）
         const val USER_PRODUCT_ID = "0A11"      // 固定用户/产品 ID
     }
 
@@ -60,11 +60,11 @@ data class ScaleSimulatorConfig(
 
     /** 生成爬升期（未测阻抗 + 爬升状态）的 AD hex */
     fun buildRampingAdvHex(weightKg: Double): String =
-        buildAdvHex(weightKg, 0, STATUS_STABLE)
+        buildAdvHex(weightKg, 0, STATUS_WEIGHING)
 
-    /** 生成稳定帧的 AD hex */
-    fun buildStableAdvHex(weightKg: Double, alternate: Boolean): String =
-        buildAdvHex(weightKg, impedanceOhm, if (alternate) STATUS_STABLE_ALT else STATUS_STABLE)
+    /** 生成稳定帧的 AD hex（稳定期状态 0x25） */
+    fun buildStableAdvHex(weightKg: Double): String =
+        buildAdvHex(weightKg, impedanceOhm, STATUS_CONFIRMED)
 }
 
 /**

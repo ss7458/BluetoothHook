@@ -62,7 +62,7 @@ class ScaleSimulatorViewModel(application: Application) : AndroidViewModel(appli
     }
 
     fun setImpedanceOhm(impedanceOhm: Int) = save {
-        it.copy(impedanceOhm = impedanceOhm.coerceIn(0, 2000))
+        it.copy(impedanceOhm = impedanceOhm.coerceIn(0, 600))
     }
 
     /** 广播源 MAC（不强制校验格式，界面负责提示） */

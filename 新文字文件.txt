@@ -1,0 +1,4 @@
+fix: move TCP I/O to background thread to avoid NetworkOnMainThreadEx…
+Build APK #29: Commit b469a03 pushed by ss7458
+
+这个版本终于可以抓包了，但是注入还是不行

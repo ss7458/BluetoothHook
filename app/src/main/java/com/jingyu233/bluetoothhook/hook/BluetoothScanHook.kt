@@ -685,23 +685,14 @@ class BluetoothScanHook(
                 try {
                     val btDevice = adapter.getRemoteDevice(device.mac) ?: continue
 
-                    // 通过反射构造 BluetoothClass，绕过 API 可见性限制
-                    val deviceClass = try {
-                        val cls = android.bluetooth.BluetoothClass::class.java
-                        val constructor = cls.getDeclaredConstructor(Int::class.javaPrimitiveType)
-                        constructor.isAccessible = true
-                        constructor.newInstance(0x5A020C) // Phone / Smartphone
-                    } catch (_: Throwable) { null }
-                    // 同时尝试作为 int fallback：有的 ROM 接受 Int 直接作为 class
-
                     val intent = Intent(BluetoothDevice.ACTION_FOUND).apply {
                         putExtra(BluetoothDevice.EXTRA_DEVICE, btDevice)
                         putExtra(BluetoothDevice.EXTRA_RSSI, device.rssi.toShort())
                         putExtra(BluetoothDevice.EXTRA_NAME, device.name)
-                        if (deviceClass != null) {
-                            try { putExtra(BluetoothDevice.EXTRA_CLASS, deviceClass) } catch (_: Throwable) {}
-                        }
-                        addFlags(android.content.Intent.FLAG_RECEIVER_FOREGROUND)
+                        // EXTRA_CLASS 传原始 int，避免  hidden-API BluetoothClass(int) 被拦截
+                        putExtra(BluetoothDevice.EXTRA_CLASS, 0x5A020C.toInt()) // Phone / Smartphone
+                        // FLAG_RECEIVER_INCLUDE_BACKGROUND (0x01000000) | FLAG_RECEIVER_FOREGROUND (0x10000000)
+                        addFlags(0x01000000 or 0x10000000)
                     }
                     context.sendBroadcast(intent)
                     Logger.Hook.i(TAG, "Classic BT broadcast: ${device.name} (${device.mac})")

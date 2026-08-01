@@ -12,11 +12,12 @@ import kotlin.random.Random
  *
  * 依据 `体重/BLE_scale_forgery_guide.md`（3.pcapng 实测）模拟真实体重秤广播：
  *   - 载荷格式：<体重 大端uint16 ÷100=kg><阻抗 大端uint16 ÷10=Ω><0A11><状态1B><MAC6B>，AD 前缀 0DFF
- *   - 广播间隔 ~100ms（真实 60-100ms）
- *   - RSSI 在基础值（默认 -60）±5dB 随机抖动（真实 -56~-85）
+ *   - 广播类型：Extended Advertising（真机 HCI 子事件 0x0d，非 legacy）
+ *   - 广播间隔 ~100ms（真实 median 77ms，p25-p75 55-175ms）
+ *   - RSSI 在基础值（默认 -63）±22dB 随机抖动（真实 -85~-56，均值 -63.7）
  *   - 上秤后体重从 0 爬升到目标值，先快后慢（ease-out 曲线，~1.8s），稳定后保持
- *   - 阻抗：爬升期 0（未测），稳定后跳到配置值（实测 600Ω = 0x1770）
- *   - 状态字节：爬升期 0x24，稳定后 0x24/0x25 交替
+ *   - 阻抗：爬升期与稳定期均为配置值（3.pcapng 实测 254/261 帧为 600Ω，仅个别帧 0Ω）
+ *   - 状态字节：爬升期 0x24，稳定期 0x25（实测 0x25×171 / 0x24×90）
  *
  * 配置来源优先级：TCP 同步 configCache.scaleJson > 文件回退 /data/local/tmp/bthook_config.json
  */
@@ -83,14 +84,15 @@ class ScaleSimulatorInjector(
                 config.buildAdvHex(weightKg, impedanceOhm, statusByte)
             }
 
-            // RSSI 抖动：基础值 ±5dB（真实抓包 -56~-85，集中 -60 附近）
-            val rssi = (config.baseRssi + Random.nextInt(-5, 6)).coerceIn(-100, -30)
+            // RSSI 抖动：真实抓包 -85~-56，均值 -63.7；baseRssi=-63 时 ±22 覆盖全范围
+            val rssi = (config.baseRssi + Random.nextInt(-22, 8)).coerceIn(-100, -30)
 
-            // 构造 ScanResult 并投递
+            // 构造 ScanResult 并投递（Extended Advertising，与真机广播类型一致）
             val scanResult = scanResultBuilder.buildScanResult(
                 macAddress = config.mac,
                 rssi = rssi,
                 advDataHex = advDataHex,
+                useExtendedAdvertising = true,
                 deviceName = null
             ) ?: return false
 
@@ -171,8 +173,8 @@ class ScaleSimulatorInjector(
                 // ease-out 曲线：先快后慢 (1-(1-t)^2)
                 val eased = 1f - (1f - t) * (1f - t)
                 val weight = config.targetWeightKg * eased
-                // 爬升期：阻抗 0（未测），状态 0x24（称重中）
-                return Triple(weight, 0, ScaleSimulatorConfig.STATUS_WEIGHING)
+                // 爬升期：阻抗同配置值（3.pcapng 实测爬升期也是 600Ω，非 0），状态 0x24（称重中）
+                return Triple(weight, config.impedanceOhm, ScaleSimulatorConfig.STATUS_WEIGHING)
             }
         }
 

@@ -10,12 +10,13 @@ import kotlin.math.roundToInt
  *   载荷(13字节) = <体重 大端uint16 ÷100=kg> + <阻抗 大端uint16 ÷10=Ω> + <0A11> + <状态1B> + <MAC6B>
  *   空口 AD 结构 = 0D FF + 载荷 (15字节)
  *
- * 真实秤行为（用于模拟）：
- *   - 广播间隔 ~60-100ms
- *   - RSSI 基础值 -60 附近 ±5dB 随机抖动
+ * 真实秤行为（3.pcapng 261 帧实测，用于模拟）：
+ *   - 广播类型 Extended Advertising（HCI 子事件 0x0d）
+ *   - 广播间隔 median 77ms（p25 55ms / p75 175ms）
+ *   - RSSI -85~-56 dBm，均值 -63.7
  *   - 上秤后体重从 0 开始，先快后慢爬升（约 1.7-2s）到目标值，稳定后保持
- *   - 阻抗：爬升期 0（未测），稳定后跳到配置值（实测 600Ω = 0x1770）
- *   - 状态字节：爬升期 0x24，稳定后 0x24/0x25 交替
+ *   - 阻抗：254/261 帧为 600Ω（0x1770），仅 7 帧为 0；爬升期与稳定期都是 600Ω
+ *   - 状态字节：称重/爬升期 0x24（90 帧），稳定/确认期 0x25（171 帧）
  */
 @Serializable
 data class ScaleSimulatorConfig(
@@ -24,10 +25,10 @@ data class ScaleSimulatorConfig(
     val mac: String = "98:F6:7A:A3:9E:F4",
     /** 目标体重 (kg)，2 位小数 */
     val targetWeightKg: Double = 10.15,
-    /** 稳定后阻抗 (Ω)，÷10 写入载荷；爬升期恒为 0 */
+    /** 阻抗 (Ω)，÷10 写入载荷；真实秤爬升期与稳定期均为 600 */
     val impedanceOhm: Int = 600,
-    /** RSSI 基础值 (dBm) */
-    val baseRssi: Int = -60,
+    /** RSSI 基础值 (dBm)，实测均值 -63.7 */
+    val baseRssi: Int = -63,
     /** 广播间隔 (ms)，真实 ~100ms */
     val intervalMs: Long = 100,
     /** 爬升时长 (ms)，真实约 1.7-2s */

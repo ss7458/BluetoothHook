@@ -34,8 +34,8 @@ data class VirtualDevice(
         return name.isNotBlank() &&
                 mac.matches(Regex("^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")) &&
                 rssi in -100..0 &&
-                advDataHex.matches(Regex("^[0-9A-Fa-f]{2}*$")) &&
-                scanResponseHex.matches(Regex("^[0-9A-Fa-f]{2}*$")) &&
+                advDataHex.matches(Regex("^(?:[0-9A-Fa-f]{2})*$")) &&
+                scanResponseHex.matches(Regex("^(?:[0-9A-Fa-f]{2})*$")) &&
                 advDataHex.length % 2 == 0 &&
                 scanResponseHex.length % 2 == 0 &&
                 isAdvDataValid() &&

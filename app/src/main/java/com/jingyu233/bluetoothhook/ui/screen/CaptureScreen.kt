@@ -445,6 +445,7 @@ private fun SignalChart(
             Spacer(modifier = Modifier.height(8.dp))
 
             // 图表区
+            val gridColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
             Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -460,7 +461,7 @@ private fun SignalChart(
                 rssiTicks.forEach { rssiVal ->
                     val y = chartBottom - (rssiVal + 100) / 100f * chartBottom
                     drawLine(
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                        color = gridColor,
                         start = Offset(chartLeft, y),
                         end = Offset(chartRight, y),
                         strokeWidth = 1f

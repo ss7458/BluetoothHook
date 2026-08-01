@@ -90,6 +90,8 @@ class BluetoothScanHook(
     private var cachedCaptureEnabled = false
     @Volatile
     private var cachedGlobalEnabled = true
+    @Volatile
+    private var cachedInjectionMode = "insert"
 
     // ── 初始化 ───────────────────────────────────────────────
 
@@ -139,6 +141,12 @@ class BluetoothScanHook(
                     method.isAccessible = true
 
                     XposedBridge.hookMethod(method, object : XC_MethodHook() {
+                        override fun beforeHookedMethod(param: MethodHookParam) {
+                            if (cachedInjectionMode == "override") {
+                                param.setResult(null)
+                            }
+                        }
+
                         override fun afterHookedMethod(param: MethodHookParam) {
                             try {
                                 handleScanResult(param)
@@ -400,6 +408,7 @@ class BluetoothScanHook(
         val synced = CaptureSocket.configCache
         cachedCaptureEnabled = synced.captureEnabled
         cachedGlobalEnabled = synced.globalEnabled
+        cachedInjectionMode = synced.injectionMode
         lastPrefReloadMs = now
         var prefsSource = "tcp"
 

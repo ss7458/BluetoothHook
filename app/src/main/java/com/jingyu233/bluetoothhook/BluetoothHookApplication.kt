@@ -22,6 +22,7 @@ class BluetoothHookApplication : Application() {
                 // ConfigBridge 内部调用 CaptureBridge.pushConfigUpdate() 热推送到 Hook
                 config.setCaptureEnabled(appSettings.captureEnabled)
                 config.setClassicIntervalMs(appSettings.classicIntervalMs)
+                config.setInjectionMode(appSettings.injectionMode)
             }
         }
     }

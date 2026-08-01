@@ -104,6 +104,16 @@ fun SettingsScreen(
                 }
             }
 
+            // 注入模式
+            item {
+                SettingsSection(title = "注入模式") {
+                    InjectionModeCard(
+                        currentMode = settings.injectionMode,
+                        onModeChange = { viewModel.updateInjectionMode(it) }
+                    )
+                }
+            }
+
             // 导入/导出部分
             item {
                 SettingsSection(title = "导入/导出") {
@@ -568,6 +578,56 @@ fun ImportExportCard(
 
             Text(
                 text = "• 导出：将当前 $deviceCount 个设备保存为 JSON\n• 导入：从 JSON 加载设备（追加模式，ID 冲突时自动生成新 ID）",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+fun InjectionModeCard(
+    currentMode: String,
+    onModeChange: (String) -> Unit
+) {
+    val isOverride = currentMode == "override"
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "选择虚拟设备注入方式",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                SegmentedButton(
+                    selected = !isOverride,
+                    onClick = { onModeChange("insert") },
+                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("插入式")
+                }
+                SegmentedButton(
+                    selected = isOverride,
+                    onClick = { onModeChange("override") },
+                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("覆盖式")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = if (isOverride)
+                    "覆盖式：拦截所有真实扫描数据，仅显示虚拟设备"
+                else
+                    "插入式：在真实设备扫描结果旁插入虚拟设备",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

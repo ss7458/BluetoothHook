@@ -25,6 +25,7 @@ class ConfigBridge(private val context: Context) {
         private const val KEY_GLOBAL_ENABLED = "global_enabled"
         const val KEY_CAPTURE_ENABLED = "capture_enabled"
         private const val KEY_CLASSIC_INTERVAL_MS = "classic_interval_ms"
+        private const val KEY_INJECTION_MODE = "injection_mode"
         private const val KEY_LAST_UPDATED = "last_updated"
 
         private val json = Json {
@@ -177,6 +178,38 @@ class ConfigBridge(private val context: Context) {
         } catch (e: Exception) {
             Logger.App.e(TAG, "Failed to get classic interval", e)
             5000
+        }
+    }
+
+    /**
+     * 设置注入模式（insert / override）
+     */
+    fun setInjectionMode(mode: String) {
+        try {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.edit()
+                .putString(KEY_INJECTION_MODE, mode)
+                .putLong(KEY_LAST_UPDATED, System.currentTimeMillis())
+                .commit()
+            ensurePrefsWorldReadable()
+            writeFallbackConfigFile()
+            Logger.App.d(TAG, "Set injection_mode = $mode")
+            com.jingyu233.bluetoothhook.data.bridge.CaptureBridge.pushConfigUpdate()
+        } catch (e: Exception) {
+            Logger.App.e(TAG, "Failed to set injection mode", e)
+        }
+    }
+
+    /**
+     * 获取注入模式，默认 "insert"
+     */
+    fun getInjectionMode(): String {
+        return try {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.getString(KEY_INJECTION_MODE, "insert") ?: "insert"
+        } catch (e: Exception) {
+            Logger.App.e(TAG, "Failed to get injection mode", e)
+            "insert"
         }
     }
 

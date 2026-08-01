@@ -34,6 +34,7 @@ class SettingsDataStore(private val context: Context) {
         private val KEY_SYNC_INTERVAL_SECONDS = intPreferencesKey("sync_interval_seconds")
         private val KEY_CAPTURE_ENABLED = booleanPreferencesKey("capture_enabled")
         private val KEY_CLASSIC_INTERVAL_MS = intPreferencesKey("classic_interval_ms")
+        private val KEY_INJECTION_MODE = stringPreferencesKey("injection_mode")
     }
 
     /**
@@ -58,7 +59,8 @@ class SettingsDataStore(private val context: Context) {
                 webdavPassword = preferences[KEY_WEBDAV_PASSWORD] ?: "",
                 autoSyncEnabled = preferences[KEY_AUTO_SYNC_ENABLED] ?: false,
                 syncIntervalSeconds = preferences[KEY_SYNC_INTERVAL_SECONDS] ?: 60,
-                classicIntervalMs = preferences[KEY_CLASSIC_INTERVAL_MS] ?: 5000
+                classicIntervalMs = preferences[KEY_CLASSIC_INTERVAL_MS] ?: 5000,
+                injectionMode = preferences[KEY_INJECTION_MODE] ?: "insert"
             )
         }
 
@@ -144,6 +146,20 @@ class SettingsDataStore(private val context: Context) {
             Logger.App.d(TAG, "Updated classic interval: $ms ms")
         } catch (e: IOException) {
             Logger.App.e(TAG, "Failed to update classic interval", e)
+        }
+    }
+
+    /**
+     * 更新注入模式
+     */
+    suspend fun updateInjectionMode(mode: String) {
+        try {
+            context.dataStore.edit { preferences ->
+                preferences[KEY_INJECTION_MODE] = mode
+            }
+            Logger.App.d(TAG, "Updated injection mode: $mode")
+        } catch (e: IOException) {
+            Logger.App.e(TAG, "Failed to update injection mode", e)
         }
     }
 

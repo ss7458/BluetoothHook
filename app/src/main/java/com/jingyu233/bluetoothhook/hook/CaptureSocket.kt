@@ -17,6 +17,7 @@ data class SyncedConfig(
     val captureEnabled: Boolean = false,
     val devicesJson: String = "[]",
     val classicIntervalMs: Int = 5000,
+    val injectionMode: String = "insert",  // ADD THIS: "insert" or "override"
     val timestamp: Long = 0L
 )
 
@@ -209,6 +210,11 @@ object CaptureSocket {
                     configCache = current.copy(classicIntervalMs = interval)
                     Logger.Hook.d(TAG, "Config hot-push: classic_interval=${interval}ms")
                 }
+                "injection_mode" -> {
+                    val mode = parts[2]
+                    configCache = current.copy(injectionMode = mode)
+                    Logger.Hook.d(TAG, "Config hot-push: injection_mode=$mode")
+                }
             }
         } catch (e: Exception) {
             Logger.Hook.w(TAG, "processConfigLine error: ${e.message}")
@@ -227,6 +233,7 @@ object CaptureSocket {
             var captureEnabled = current.captureEnabled
             var devicesJson = current.devicesJson
             var classicIntervalMs = current.classicIntervalMs
+            var injectionMode = current.injectionMode
             var timestamp = current.timestamp
             var configLineCount = 0
 
@@ -258,6 +265,10 @@ object CaptureSocket {
                         classicIntervalMs = parts[2].toIntOrNull() ?: 5000
                         Logger.Hook.d(TAG, "Config: classic_interval=${classicIntervalMs}ms")
                     }
+                    "injection_mode" -> {
+                        injectionMode = parts[2]
+                        Logger.Hook.d(TAG, "Config: injection_mode=$injectionMode")
+                    }
                 }
             }
 
@@ -266,6 +277,7 @@ object CaptureSocket {
                 captureEnabled = captureEnabled,
                 devicesJson = devicesJson,
                 classicIntervalMs = classicIntervalMs,
+                injectionMode = injectionMode,
                 timestamp = timestamp
             )
             Logger.Hook.d(TAG, "readConfigFromServer finished, $configLineCount line(s) read")

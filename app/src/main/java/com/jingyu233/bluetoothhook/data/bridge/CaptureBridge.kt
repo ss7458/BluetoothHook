@@ -335,6 +335,9 @@ object CaptureBridge {
         val classicIntervalMs = configBridge.getClassicIntervalMs()
         os.write("CFG|classic_interval|$classicIntervalMs\n".toByteArray(Charsets.UTF_8))
 
+        val injectionMode = configBridge.getInjectionMode()
+        os.write("CFG|injection_mode|$injectionMode\n".toByteArray(Charsets.UTF_8))
+
         os.write("CFG|END\n".toByteArray(Charsets.UTF_8))
         os.flush()
     }

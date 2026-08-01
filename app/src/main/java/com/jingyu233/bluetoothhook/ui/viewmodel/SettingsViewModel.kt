@@ -81,7 +81,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     _settings.value.captureEnabled != settings.captureEnabled ||
                     _settings.value.autoSyncEnabled != settings.autoSyncEnabled ||
                     _settings.value.syncIntervalSeconds != settings.syncIntervalSeconds ||
-                    _settings.value.classicIntervalMs != settings.classicIntervalMs) {
+                    _settings.value.classicIntervalMs != settings.classicIntervalMs ||
+                    _settings.value.injectionMode != settings.injectionMode) {
                     _settings.value = settings
                     Logger.App.d(TAG, "Loaded settings from DataStore")
                 }
@@ -140,8 +141,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         _settings.value = _settings.value.copy(classicIntervalMs = ms)
         viewModelScope.launch {
             settingsDataStore.updateClassicInterval(ms)
-            // 同步到 ConfigBridge 以便 TCP CFG 传到 hook 进程
             ConfigBridge(getApplication()).setClassicIntervalMs(ms)
+        }
+    }
+
+    fun updateInjectionMode(mode: String) {
+        _settings.value = _settings.value.copy(injectionMode = mode)
+        viewModelScope.launch {
+            settingsDataStore.updateInjectionMode(mode)
+            ConfigBridge(getApplication()).setInjectionMode(mode)
         }
     }
 

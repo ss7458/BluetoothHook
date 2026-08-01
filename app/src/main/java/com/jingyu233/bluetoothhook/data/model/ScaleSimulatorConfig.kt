@@ -50,7 +50,7 @@ data class ScaleSimulatorConfig(
         statusByte: Int
     ): String {
         val weightRaw = (weightKg * 100).roundToInt().coerceIn(0, 65535)
-        val impRaw = (impedanceOhm * 10).roundToInt().coerceIn(0, 65535)
+        val impRaw = (impedanceOhm * 10).coerceIn(0, 65535)
         val macHex = mac.replace(":", "").uppercase()
         return String.format(
             "0DFF%04X%04X%s%02X%s",
@@ -108,7 +108,7 @@ object ScalePayloadCodec {
 
         return ParsedScaleData(
             weightKg = weightRaw / 100.0,
-            impedanceOhm = impRaw / 10.0,
+            impedanceOhm = impRaw / 10,
             statusByte = statusByte,
             mac = mac,
             valid = weightRaw in 0..65535 && mac.isNotEmpty()

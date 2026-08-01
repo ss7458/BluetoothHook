@@ -617,6 +617,5 @@ private fun PreviewCard(
 private fun roundToDecimal(value: Double): Double =
     (value * 10).roundToInt() / 10.0
 
-/** 阻抗为整数时不显示小数位 */
-private fun formatImpedance(ohm: Double): String =
-    if (ohm % 1.0 == 0.0) ohm.toInt().toString() else String.format("%.1f", ohm)
+/** 阻抗显示（整数） */
+private fun formatImpedance(ohm: Int): String = "$ohm"

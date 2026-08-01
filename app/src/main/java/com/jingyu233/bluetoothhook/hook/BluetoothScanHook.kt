@@ -106,6 +106,8 @@ class BluetoothScanHook(
             scanResultBuilder = ScanResultBuilder(classLoader)
             virtualDeviceInjector = VirtualDeviceInjector(scanResultBuilder, prefs)
 
+            hookBluetoothEventManager()
+
             val hooked = hookScanResultInternal()
 
             if (hooked) {
@@ -344,6 +346,60 @@ class BluetoothScanHook(
         CaptureSocket.sendLine(buildStatusLine(fieldsResolved))
     }
 
+    // ── BluetoothEventManager 直注 ───────────────────────
+
+    /** 通过 BluetoothEventManager.dispatchDeviceAdded 直接投喂设备给所有 settings UI */
+    @Volatile
+    private var bluetoothEventManager: Any? = null
+
+    @Volatile
+    private var cachedBluetoothDeviceManager: Any? = null
+
+    private fun hookBluetoothEventManager() {
+        try {
+            val eventMgrClass = XposedHelpers.findClass(
+                "com.android.settingslib.bluetooth.BluetoothEventManager",
+                classLoader
+            )
+            XposedBridge.hookAllConstructors(eventMgrClass, object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    bluetoothEventManager = param.thisObject
+                    try {
+                        cachedBluetoothDeviceManager = XposedHelpers.getObjectField(
+                            param.thisObject, "mDeviceManager"
+                        )
+                    } catch (_: Throwable) {}
+                    Logger.Hook.i(TAG, "BluetoothEventManager hooked: ready")
+                }
+            })
+            Logger.Hook.i(TAG, "BluetoothEventManager hooks installed")
+        } catch (e: Throwable) {
+            Logger.Hook.w(TAG, "BluetoothEventManager not available in bluetooth process: ${e.message}")
+        }
+    }
+
+    /**
+     * 通过 CachedBluetoothDeviceManager 或直接反射创建 CachedBluetoothDevice，
+     * 然后调用 dispatchDeviceAdded 注入到所有 settings UI 回调。
+     */
+    private fun injectViaEventManager(deviceMac: String, deviceName: String, rssi: Int) {
+        try {
+            val deviceMgr = cachedBluetoothDeviceManager ?: return
+            val btAdapter = BluetoothAdapter.getDefaultAdapter() ?: return
+            val btDevice = btAdapter.getRemoteDevice(deviceMac) ?: return
+            val cachedDevice = XposedHelpers.callMethod(deviceMgr, "findDevice", btDevice)
+            if (cachedDevice == null) {
+                Logger.Hook.d(TAG, "EventManager inject: device not found in manager for $deviceMac")
+                return
+            }
+            val eventMgr = bluetoothEventManager ?: return
+            XposedHelpers.callMethod(eventMgr, "dispatchDeviceAdded", cachedDevice)
+            Logger.Hook.i(TAG, "EventManager injected: $deviceName ($deviceMac)")
+        } catch (e: Throwable) {
+            Logger.Hook.d(TAG, "EventManager inject error: ${e.message}")
+        }
+    }
+
     // ── 定时注入（不依赖周围是否有真实 BLE 设备） ─────────────
 
     @Volatile
@@ -380,6 +436,8 @@ class BluetoothScanHook(
                             lastClassicBroadcastMs = now
                             injectClassicDiscoveryBroadcast()
                         }
+                        // 通过 BluetoothEventManager 直接投喂设备到所有 settings UI 回调
+                        injectViaEventManagerForAllDevices()
                     } else {
                         // global_enabled=false 时静默跳过，不刷日志
                     }
@@ -703,6 +761,25 @@ class BluetoothScanHook(
         } catch (e: Throwable) {
             Logger.Hook.d(TAG, "Classic BT inject error: ${e.message}")
         }
+    }
+
+    /**
+     * 遍历所有启用的虚拟设备，通过 BluetoothEventManager.dispatchDeviceAdded
+     * 直接注入到所有 settings UI 回调（绕过 ACTION_FOUND 广播）。
+     */
+    private fun injectViaEventManagerForAllDevices() {
+        if (bluetoothEventManager == null || cachedBluetoothDeviceManager == null) return
+        try {
+            val devicesJson = readDevicesJsonForClassic()
+            if (devicesJson == "[]") return
+            val devices = json.decodeFromString<List<VirtualDevice>>(devicesJson)
+            for (device in devices) {
+                if (!device.enabled) continue
+                try {
+                    injectViaEventManager(device.mac, device.name, device.rssi)
+                } catch (_: Throwable) {}
+            }
+        } catch (_: Throwable) {}
     }
 
     // ── 自适应逐客户端投递（fallback） ───────────────────────

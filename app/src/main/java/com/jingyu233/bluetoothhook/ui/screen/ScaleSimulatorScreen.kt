@@ -649,7 +649,7 @@ private fun PreviewCard(
     manualMode: Boolean
 ) {
     val previewHex = remember(config) {
-        config.buildStableAdvHex(config.targetWeightKg, false)
+        config.buildStableAdvHex(config.targetWeightKg)
     }
 
     Card(

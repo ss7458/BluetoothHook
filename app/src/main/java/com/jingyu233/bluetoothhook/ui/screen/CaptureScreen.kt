@@ -867,7 +867,8 @@ private fun parseLocalName(advDataHex: String): String? {
         if (type == 0x08 || type == 0x09) {     // Local Name（短名/完整名）
             val nameBytes = bytes.subList(i + 2, i + 1 + len)
             if (nameBytes.isEmpty()) return null
-            return String(nameBytes.toByteArray(), Charsets.UTF_8)
+            val byteArray = ByteArray(nameBytes.size) { nameBytes[it].toByte() }
+            return String(byteArray, Charsets.UTF_8)
                 .trim()
                 .takeIf { it.isNotEmpty() }
         }
